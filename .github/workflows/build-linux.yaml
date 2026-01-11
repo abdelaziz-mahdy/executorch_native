@@ -11,6 +11,10 @@ on:
         required: true
         default: '1.0.1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
@@ -25,11 +29,11 @@ jobs:
             backends: "xnnpack"
             vulkan: "OFF"
             xnnpack: "ON"
-          # x64 with Vulkan
-          - arch: x64
-            backends: "vulkan"
-            vulkan: "ON"
-            xnnpack: "OFF"
+          # TODO: Vulkan builds disabled - volk submodule needs setup
+          # - arch: x64
+          #   backends: "vulkan"
+          #   vulkan: "ON"
+          #   xnnpack: "OFF"
 
     runs-on: ubuntu-22.04
     name: Linux ${{ matrix.arch }} (${{ matrix.backends }})

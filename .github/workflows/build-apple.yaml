@@ -11,6 +11,10 @@ on:
         required: true
         default: '1.0.1'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
