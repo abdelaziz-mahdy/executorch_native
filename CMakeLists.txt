@@ -13,9 +13,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ExecuTorch version
-if(NOT EXECUTORCH_VERSION)
-    set(EXECUTORCH_VERSION "1.0.1")
+# ExecuTorch version (must be quoted string to prevent truncation)
+if(NOT DEFINED EXECUTORCH_VERSION OR "${EXECUTORCH_VERSION}" STREQUAL "")
+    set(EXECUTORCH_VERSION "1.0.1" CACHE STRING "ExecuTorch version to use" FORCE)
+else()
+    set(EXECUTORCH_VERSION "${EXECUTORCH_VERSION}" CACHE STRING "ExecuTorch version to use" FORCE)
 endif()
 
 # Build mode: "prebuilt" (default) or "source"
@@ -129,12 +131,43 @@ message(STATUS "  Architecture: ${EXECUTORCH_ARCH}")
 # ============================================================================
 
 if(EXECUTORCH_BUILD_MODE STREQUAL "prebuilt")
-    # Download pre-built binaries
+    # Download pre-built FFI library - no compilation needed
     include(cmake/download_prebuilt.cmake)
-else()
-    # Build from source
-    include(cmake/build_from_source.cmake)
+
+    # In prebuilt mode, we just copy the downloaded library to install location
+    # The prebuilt tarball already contains lib/ and include/
+    message(STATUS "Using pre-built FFI library from: ${EXECUTORCH_INSTALL_DIR}")
+
+    # Create a custom target that just installs the prebuilt files
+    add_custom_target(${PROJECT_NAME} ALL
+        COMMENT "Using pre-built executorch_ffi library"
+    )
+
+    # Install prebuilt library and headers
+    install(DIRECTORY ${EXECUTORCH_INSTALL_DIR}/lib/
+        DESTINATION lib
+        FILES_MATCHING
+        PATTERN "*.so*"
+        PATTERN "*.dylib*"
+        PATTERN "*.dll"
+        PATTERN "*.a"
+        PATTERN "*.lib"
+    )
+
+    install(DIRECTORY ${EXECUTORCH_INSTALL_DIR}/include/
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h"
+    )
+
+    message(STATUS "============================================================")
+    return()  # Skip the rest of CMakeLists.txt for prebuilt mode
 endif()
+
+# ============================================================================
+# Source Build Mode - Build from source
+# ============================================================================
+
+include(cmake/build_from_source.cmake)
 
 # ============================================================================
 # Build FFI Library
