@@ -15,20 +15,35 @@ env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
 jobs:
-  build-macos:
+  build:
     strategy:
       fail-fast: false
       matrix:
         include:
+          # macOS x64
           - runner: macos-13
+            platform: macos
             arch: x64
             backends: "xnnpack-coreml"
+            mps: "OFF"
+            ios: false
+          # macOS arm64
           - runner: macos-14
+            platform: macos
             arch: arm64
             backends: "xnnpack-coreml-mps"
+            mps: "ON"
+            ios: false
+          # iOS arm64
+          - runner: macos-14
+            platform: ios
+            arch: arm64
+            backends: "xnnpack-coreml"
+            mps: "OFF"
+            ios: true
 
     runs-on: ${{ matrix.runner }}
-    name: macOS ${{ matrix.arch }} (${{ matrix.backends }})
+    name: ${{ matrix.platform }} ${{ matrix.arch }} (${{ matrix.backends }})
 
     steps:
       - name: Checkout
@@ -42,7 +57,8 @@ jobs:
       - name: Install Python dependencies
         run: pip install pyyaml
 
-      - name: Configure CMake
+      - name: Configure CMake (macOS)
+        if: ${{ !matrix.ios }}
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -51,45 +67,11 @@ jobs:
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
-            -DET_BUILD_MPS=${{ matrix.arch == 'arm64' && 'ON' || 'OFF' }} \
+            -DET_BUILD_MPS=${{ matrix.mps }} \
             -DCMAKE_INSTALL_PREFIX=build/install
 
-      - name: Build
-        run: cmake --build build --config Release --parallel $(sysctl -n hw.ncpu)
-
-      - name: Install
-        run: cmake --install build --config Release
-
-      - name: Package
-        run: |
-          mkdir -p dist
-          cd build/install
-          tar -czvf ../../dist/libexecutorch_ffi-macos-${{ matrix.arch }}-${{ matrix.backends }}.tar.gz .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}-${{ matrix.backends }}
-          path: dist/*.tar.gz
-          retention-days: 7
-
-  build-ios:
-    runs-on: macos-14
-    name: iOS arm64 (xnnpack-coreml)
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: pip install pyyaml
-
-      - name: Configure CMake
+      - name: Configure CMake (iOS)
+        if: ${{ matrix.ios }}
         run: |
           cmake -B build \
             -G Xcode \
@@ -104,7 +86,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=build/install
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel $(sysctl -n hw.ncpu)
 
       - name: Install
         run: cmake --install build --config Release
@@ -113,19 +95,21 @@ jobs:
         run: |
           mkdir -p dist
           cd build/install
-          tar -czvf ../../dist/libexecutorch_ffi-ios-arm64-xnnpack-coreml.tar.gz .
+          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}.tar.gz .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-arm64-xnnpack-coreml
+          name: ${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}
           path: dist/*.tar.gz
           retention-days: 7
 
   release:
-    needs: [build-macos, build-ios]
+    needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
 
     steps:
       - name: Download all artifacts
@@ -140,9 +124,7 @@ jobs:
           ls -la release/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*.tar.gz
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
