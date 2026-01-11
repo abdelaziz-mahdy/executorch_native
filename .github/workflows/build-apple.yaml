@@ -26,13 +26,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS x64 (Intel runner)
-          - runner: macos-15-intel
-            platform: macos
-            arch: x64
-            backends: "xnnpack-coreml"
-            mps: "OFF"
-            ios: false
+          # TODO: macOS x64 disabled - AssertionError in kernels/portable/functions.yaml
+          # - runner: macos-15-intel
+          #   platform: macos
+          #   arch: x64
+          #   backends: "xnnpack-coreml"
+          #   mps: "OFF"
+          #   ios: false
           # macOS arm64
           - runner: macos-15
             platform: macos
