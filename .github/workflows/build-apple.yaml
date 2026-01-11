@@ -26,8 +26,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS x64
-          - runner: macos-15-large
+          # macOS x64 (cross-compiled on ARM64 runner)
+          - runner: macos-15
             platform: macos
             arch: x64
             backends: "xnnpack-coreml"
@@ -72,9 +72,15 @@ jobs:
       - name: Configure CMake (macOS)
         if: ${{ !matrix.ios }}
         run: |
+          # Set architecture for cross-compilation (x64 on ARM64 runner)
+          CMAKE_ARCH_FLAG=""
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            CMAKE_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=x86_64"
+          fi
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            $CMAKE_ARCH_FLAG \
             -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=ON \
