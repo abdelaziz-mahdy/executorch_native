@@ -1,0 +1,112 @@
+name: Build Android
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.0.1)'
+        required: true
+        default: '1.0.1'
+
+env:
+  EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
+  ANDROID_NDK_VERSION: r26c
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64-v8a with XNNPACK
+          - abi: arm64-v8a
+            backends: "xnnpack"
+          # x86_64 with XNNPACK (for emulator)
+          - abi: x86_64
+            backends: "xnnpack"
+
+    runs-on: ubuntu-latest
+    name: Android ${{ matrix.abi }} (${{ matrix.backends }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+          pip install pyyaml
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.ANDROID_NDK_VERSION }}
+
+      - name: Configure CMake
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-23 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=ON \
+            -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Install
+        run: cmake --install build
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cd build/install
+          tar -czvf ../../dist/libexecutorch_ffi-android-${{ matrix.abi }}-${{ matrix.backends }}.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.abi }}-${{ matrix.backends }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

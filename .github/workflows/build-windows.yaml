@@ -1,0 +1,109 @@
+name: Build Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.0.1)'
+        required: true
+        default: '1.0.1'
+
+env:
+  EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 with XNNPACK
+          - arch: x64
+            cmake_arch: x64
+            backends: "xnnpack"
+            vulkan: "OFF"
+          # x64 with Vulkan
+          - arch: x64
+            cmake_arch: x64
+            backends: "vulkan"
+            vulkan: "ON"
+            xnnpack: "OFF"
+
+    runs-on: windows-latest
+    name: Windows ${{ matrix.arch }} (${{ matrix.backends }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Install Vulkan SDK
+        if: matrix.vulkan == 'ON'
+        uses: humbletim/install-vulkan-sdk@v1.1.1
+        with:
+          version: latest
+          cache: true
+
+      - name: Configure CMake
+        run: |
+          cmake -B build `
+            -A ${{ matrix.cmake_arch }} `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} `
+            -DEXECUTORCH_BUILD_MODE=source `
+            -DET_BUILD_XNNPACK=${{ matrix.xnnpack || 'ON' }} `
+            -DET_BUILD_VULKAN=${{ matrix.vulkan || 'OFF' }} `
+            -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Compress-Archive -Path build/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}-${{ matrix.backends }}
+          path: dist/*.zip
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.zip" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

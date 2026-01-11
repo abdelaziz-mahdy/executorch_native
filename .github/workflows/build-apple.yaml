@@ -1,0 +1,148 @@
+name: Build Apple (macOS + iOS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.0.1)'
+        required: true
+        default: '1.0.1'
+
+env:
+  EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
+
+jobs:
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            arch: x64
+            backends: "xnnpack-coreml"
+          - runner: macos-14
+            arch: arm64
+            backends: "xnnpack-coreml-mps"
+
+    runs-on: ${{ matrix.runner }}
+    name: macOS ${{ matrix.arch }} (${{ matrix.backends }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=ON \
+            -DET_BUILD_COREML=ON \
+            -DET_BUILD_MPS=${{ matrix.arch == 'arm64' && 'ON' || 'OFF' }} \
+            -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build
+        run: cmake --build build --config Release --parallel $(sysctl -n hw.ncpu)
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cd build/install
+          tar -czvf ../../dist/libexecutorch_ffi-macos-${{ matrix.arch }}-${{ matrix.backends }}.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-${{ matrix.backends }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  build-ios:
+    runs-on: macos-14
+    name: iOS arm64 (xnnpack-coreml)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=ON \
+            -DET_BUILD_COREML=ON \
+            -DET_BUILD_MPS=OFF \
+            -DCMAKE_INSTALL_PREFIX=build/install
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Install
+        run: cmake --install build --config Release
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cd build/install
+          tar -czvf ../../dist/libexecutorch_ffi-ios-arm64-xnnpack-coreml.tar.gz .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-arm64-xnnpack-coreml
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  release:
+    needs: [build-macos, build-ios]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
