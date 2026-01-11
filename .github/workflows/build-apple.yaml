@@ -65,6 +65,10 @@ jobs:
         # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
         run: pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
+      - name: Install Ninja (iOS)
+        if: ${{ matrix.ios }}
+        run: brew install ninja
+
       - name: Configure CMake (macOS)
         if: ${{ !matrix.ios }}
         run: |
@@ -81,20 +85,20 @@ jobs:
       - name: Configure CMake (iOS)
         if: ${{ matrix.ios }}
         run: |
-          cmake -B build \
-            -G Xcode \
+          # Use Ninja generator instead of Xcode to avoid code signing issues
+          # with ExternalProject builds (flatcc_cli)
+          cmake -B build -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
+            -DCMAKE_BUILD_TYPE=Release \
             -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
             -DET_BUILD_MPS=OFF \
-            -DCMAKE_INSTALL_PREFIX=build/install \
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
-            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+            -DCMAKE_INSTALL_PREFIX=build/install
 
       - name: Build (macOS)
         if: ${{ !matrix.ios }}
@@ -102,11 +106,7 @@ jobs:
 
       - name: Build (iOS)
         if: ${{ matrix.ios }}
-        run: |
-          cmake --build build --config Release --parallel $(sysctl -n hw.ncpu) -- \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+        run: cmake --build build --parallel $(sysctl -n hw.ncpu)
 
       - name: Install
         run: cmake --install build --config Release
