@@ -49,7 +49,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build
-          pip install pyyaml torchgen
+          # Install CPU-only torch (includes torchgen with proper model module)
+          pip install pyyaml torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure CMake
         run: |

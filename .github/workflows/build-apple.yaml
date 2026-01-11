@@ -61,7 +61,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install pyyaml torchgen
+        # Install CPU-only torch (includes torchgen with proper model module)
+        run: pip install pyyaml torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure CMake (macOS)
         if: ${{ !matrix.ios }}
@@ -89,10 +90,22 @@ jobs:
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
             -DET_BUILD_MPS=OFF \
-            -DCMAKE_INSTALL_PREFIX=build/install
+            -DCMAKE_INSTALL_PREFIX=build/install \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
 
-      - name: Build
+      - name: Build (macOS)
+        if: ${{ !matrix.ios }}
         run: cmake --build build --config Release --parallel $(sysctl -n hw.ncpu)
+
+      - name: Build (iOS)
+        if: ${{ matrix.ios }}
+        run: |
+          cmake --build build --config Release --parallel $(sysctl -n hw.ncpu) -- \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
 
       - name: Install
         run: cmake --install build --config Release

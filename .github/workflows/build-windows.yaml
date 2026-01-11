@@ -53,7 +53,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install pyyaml torchgen
+        # Install CPU-only torch (includes torchgen with proper model module)
+        run: pip install pyyaml torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install Vulkan SDK
         if: matrix.vulkan == 'ON'
@@ -71,8 +72,11 @@ jobs:
 
       - name: Configure CMake
         run: |
+          # Use ClangCL toolset to avoid MSVC flag compatibility issues
+          # (ExecuTorch uses GCC-style warning flags that MSVC doesn't understand)
           cmake -B build `
             -A ${{ matrix.cmake_arch }} `
+            -T ClangCL `
             -DCMAKE_BUILD_TYPE=Release `
             "-DEXECUTORCH_VERSION:STRING=${{ env.EXECUTORCH_VERSION }}" `
             -DEXECUTORCH_BUILD_MODE=source `
