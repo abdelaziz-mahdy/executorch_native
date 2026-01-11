@@ -21,21 +21,21 @@ jobs:
       matrix:
         include:
           # macOS x64
-          - runner: macos-13
+          - runner: macos-15-large
             platform: macos
             arch: x64
             backends: "xnnpack-coreml"
             mps: "OFF"
             ios: false
           # macOS arm64
-          - runner: macos-14
+          - runner: macos-15
             platform: macos
             arch: arm64
             backends: "xnnpack-coreml-mps"
             mps: "ON"
             ios: false
           # iOS arm64
-          - runner: macos-14
+          - runner: macos-15
             platform: ios
             arch: arm64
             backends: "xnnpack-coreml"
