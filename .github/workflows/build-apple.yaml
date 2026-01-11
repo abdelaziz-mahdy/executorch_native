@@ -62,7 +62,8 @@ jobs:
 
       - name: Install Python dependencies
         # Install CPU-only torch (includes torchgen with proper model module)
-        run: pip install pyyaml torch --index-url https://download.pytorch.org/whl/cpu
+        # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
+        run: pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
       - name: Configure CMake (macOS)
         if: ${{ !matrix.ios }}
