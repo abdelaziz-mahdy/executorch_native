@@ -53,7 +53,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml torchgen
 
       - name: Install Vulkan SDK
         if: matrix.vulkan == 'ON'

@@ -94,18 +94,23 @@ set(_original_python ${PYTHON_EXECUTABLE})
 set(_python_wrapper_dir ${CMAKE_BINARY_DIR}/python_wrapper)
 file(MAKE_DIRECTORY ${_python_wrapper_dir})
 
+# PYTHONPATH needs to point to the PARENT of executorch so Python can find 'executorch' package
+# executorch_SOURCE_DIR = ${CMAKE_BINARY_DIR}/executorch
+# So PYTHONPATH should be ${CMAKE_BINARY_DIR} to allow 'from executorch.codegen import ...'
+set(_pythonpath_dir ${CMAKE_BINARY_DIR})
+
 if(WIN32)
     set(_python_wrapper ${_python_wrapper_dir}/python_wrapper.bat)
     file(WRITE ${_python_wrapper}
 "@echo off
-set PYTHONPATH=${executorch_SOURCE_DIR};%PYTHONPATH%
+set PYTHONPATH=${_pythonpath_dir};%PYTHONPATH%
 \"${_original_python}\" %*
 ")
 else()
     set(_python_wrapper ${_python_wrapper_dir}/python_wrapper.sh)
     file(WRITE ${_python_wrapper}
 "#!/bin/bash
-export PYTHONPATH=\"${executorch_SOURCE_DIR}:\$PYTHONPATH\"
+export PYTHONPATH=\"${_pythonpath_dir}:\$PYTHONPATH\"
 exec \"${_original_python}\" \"$@\"
 ")
     execute_process(COMMAND chmod +x ${_python_wrapper})
