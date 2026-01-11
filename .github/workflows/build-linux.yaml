@@ -2,6 +2,8 @@ name: Build Linux
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -65,7 +67,7 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} \
             -DET_BUILD_VULKAN=${{ matrix.vulkan }} \

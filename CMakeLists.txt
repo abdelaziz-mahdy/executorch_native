@@ -13,9 +13,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ExecuTorch version
-if(NOT EXECUTORCH_VERSION)
-    set(EXECUTORCH_VERSION "1.0.1")
+# ExecuTorch version (must be quoted string to prevent truncation)
+if(NOT DEFINED EXECUTORCH_VERSION OR "${EXECUTORCH_VERSION}" STREQUAL "")
+    set(EXECUTORCH_VERSION "1.0.1" CACHE STRING "ExecuTorch version to use" FORCE)
+else()
+    set(EXECUTORCH_VERSION "${EXECUTORCH_VERSION}" CACHE STRING "ExecuTorch version to use" FORCE)
 endif()
 
 # Build mode: "prebuilt" (default) or "source"

@@ -2,6 +2,8 @@ name: Build Apple (macOS + iOS)
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -67,7 +69,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
@@ -82,7 +84,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DEXECUTORCH_VERSION=${{ env.EXECUTORCH_VERSION }} \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
