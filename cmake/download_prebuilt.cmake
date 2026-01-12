@@ -26,9 +26,15 @@ else()
     set(_archive_ext "tar.gz")
 endif()
 
-# Build the filename based on platform, arch, and variant
+# Determine build type suffix (lowercase: release or debug)
+string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
+if(NOT _build_type_lower)
+    set(_build_type_lower "release")
+endif()
+
+# Build the filename based on platform, arch, variant, and build type
 set(_filename
-    "libexecutorch_ffi-${EXECUTORCH_PLATFORM}-${EXECUTORCH_ARCH}-${EXECUTORCH_VARIANT}.${_archive_ext}")
+    "libexecutorch_ffi-${EXECUTORCH_PLATFORM}-${EXECUTORCH_ARCH}-${EXECUTORCH_VARIANT}-${_build_type_lower}.${_archive_ext}")
 set(_base_url "${EXECUTORCH_PREBUILT_URL_BASE}/v${EXECUTORCH_VERSION}/${_filename}")
 
 # Generate cache-busting timestamp (changes each configure)
@@ -43,6 +49,7 @@ message(STATUS "  Version: v${EXECUTORCH_VERSION}")
 message(STATUS "  Platform: ${EXECUTORCH_PLATFORM}")
 message(STATUS "  Architecture: ${EXECUTORCH_ARCH}")
 message(STATUS "  Variant: ${EXECUTORCH_VARIANT}")
+message(STATUS "  Build Type: ${_build_type_lower}")
 message(STATUS "  Filename: ${_filename}")
 message(STATUS "  URL: ${_url}")
 message(STATUS "  Hash URL: ${_hash_url}")

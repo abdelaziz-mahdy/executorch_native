@@ -33,12 +33,6 @@ jobs:
             backends: "xnnpack"
             vulkan: "OFF"
             xnnpack: "ON"
-          # TODO: Vulkan builds disabled - volk submodule needs setup
-          # - arch: x64
-          #   cmake_arch: x64
-          #   backends: "vulkan"
-          #   vulkan: "ON"
-          #   xnnpack: "OFF"
 
     runs-on: windows-latest
     name: Windows ${{ matrix.arch }} (${{ matrix.backends }})
@@ -71,11 +65,12 @@ jobs:
           echo "VULKAN_SDK=$vulkanPath" >> $env:GITHUB_ENV
           echo "$vulkanPath\Bin" >> $env:GITHUB_PATH
 
-      - name: Configure CMake
+      # Build Release version
+      - name: Configure CMake (Release)
         run: |
           # Use ClangCL toolset to avoid MSVC flag compatibility issues
           # (ExecuTorch uses GCC-style warning flags that MSVC doesn't understand)
-          cmake -B build `
+          cmake -B build-release `
             -A ${{ matrix.cmake_arch }} `
             -T ClangCL `
             -DCMAKE_BUILD_TYPE=Release `
@@ -83,20 +78,41 @@ jobs:
             -DEXECUTORCH_BUILD_MODE=source `
             -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} `
             -DET_BUILD_VULKAN=${{ matrix.vulkan }} `
-            -DCMAKE_INSTALL_PREFIX=build/install
+            -DCMAKE_INSTALL_PREFIX=build-release/install
 
-      - name: Build
-        run: cmake --build build --config Release --parallel
+      - name: Build (Release)
+        run: cmake --build build-release --config Release --parallel
 
-      - name: Install
-        run: cmake --install build --config Release
+      - name: Install (Release)
+        run: cmake --install build-release --config Release
 
+      # Build Debug version
+      - name: Configure CMake (Debug)
+        run: |
+          cmake -B build-debug `
+            -A ${{ matrix.cmake_arch }} `
+            -T ClangCL `
+            -DCMAKE_BUILD_TYPE=Debug `
+            "-DEXECUTORCH_VERSION:STRING=${{ env.EXECUTORCH_VERSION }}" `
+            -DEXECUTORCH_BUILD_MODE=source `
+            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} `
+            -DET_BUILD_VULKAN=${{ matrix.vulkan }} `
+            -DCMAKE_INSTALL_PREFIX=build-debug/install
+
+      - name: Build (Debug)
+        run: cmake --build build-debug --config Debug --parallel
+
+      - name: Install (Debug)
+        run: cmake --install build-debug --config Debug
+
+      # Package both versions
       - name: Package
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Compress-Archive -Path build/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}.zip
+          Compress-Archive -Path build-release/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}-release.zip
+          Compress-Archive -Path build-debug/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}-debug.zip
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-${{ matrix.arch }}-${{ matrix.backends }}

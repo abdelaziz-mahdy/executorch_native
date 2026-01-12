@@ -26,13 +26,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # TODO: macOS x64 disabled - AssertionError in kernels/portable/functions.yaml
-          # - runner: macos-15-intel
-          #   platform: macos
-          #   arch: x64
-          #   backends: "xnnpack-coreml"
-          #   mps: "OFF"
-          #   ios: false
           # macOS arm64
           - runner: macos-15
             platform: macos
@@ -69,10 +62,11 @@ jobs:
         if: ${{ matrix.ios }}
         run: brew install ninja
 
-      - name: Configure CMake (macOS)
+      # Build Release version (macOS)
+      - name: Configure CMake Release (macOS)
         if: ${{ !matrix.ios }}
         run: |
-          cmake -B build \
+          cmake -B build-release \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
             -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
@@ -80,14 +74,43 @@ jobs:
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
             -DET_BUILD_MPS=${{ matrix.mps }} \
-            -DCMAKE_INSTALL_PREFIX=build/install
+            -DCMAKE_INSTALL_PREFIX=build-release/install
 
-      - name: Configure CMake (iOS)
+      - name: Build Release (macOS)
+        if: ${{ !matrix.ios }}
+        run: cmake --build build-release --config Release --parallel $(sysctl -n hw.ncpu)
+
+      - name: Install Release (macOS)
+        if: ${{ !matrix.ios }}
+        run: cmake --install build-release --config Release
+
+      # Build Debug version (macOS)
+      - name: Configure CMake Debug (macOS)
+        if: ${{ !matrix.ios }}
+        run: |
+          cmake -B build-debug \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=ON \
+            -DET_BUILD_COREML=ON \
+            -DET_BUILD_MPS=${{ matrix.mps }} \
+            -DCMAKE_INSTALL_PREFIX=build-debug/install
+
+      - name: Build Debug (macOS)
+        if: ${{ !matrix.ios }}
+        run: cmake --build build-debug --config Debug --parallel $(sysctl -n hw.ncpu)
+
+      - name: Install Debug (macOS)
+        if: ${{ !matrix.ios }}
+        run: cmake --install build-debug --config Debug
+
+      # Build Release version (iOS)
+      - name: Configure CMake Release (iOS)
         if: ${{ matrix.ios }}
         run: |
-          # Use Ninja generator instead of Xcode to avoid code signing issues
-          # with ExternalProject builds (flatcc_cli)
-          cmake -B build -G Ninja \
+          cmake -B build-release -G Ninja \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
@@ -98,26 +121,51 @@ jobs:
             -DET_BUILD_XNNPACK=ON \
             -DET_BUILD_COREML=ON \
             -DET_BUILD_MPS=OFF \
-            -DCMAKE_INSTALL_PREFIX=build/install
+            -DCMAKE_INSTALL_PREFIX=build-release/install
 
-      - name: Build (macOS)
-        if: ${{ !matrix.ios }}
-        run: cmake --build build --config Release --parallel $(sysctl -n hw.ncpu)
-
-      - name: Build (iOS)
+      - name: Build Release (iOS)
         if: ${{ matrix.ios }}
-        run: cmake --build build --parallel $(sysctl -n hw.ncpu)
+        run: cmake --build build-release --parallel $(sysctl -n hw.ncpu)
 
-      - name: Install
-        run: cmake --install build --config Release
+      - name: Install Release (iOS)
+        if: ${{ matrix.ios }}
+        run: cmake --install build-release
 
+      # Build Debug version (iOS)
+      - name: Configure CMake Debug (iOS)
+        if: ${{ matrix.ios }}
+        run: |
+          cmake -B build-debug -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=ON \
+            -DET_BUILD_COREML=ON \
+            -DET_BUILD_MPS=OFF \
+            -DCMAKE_INSTALL_PREFIX=build-debug/install
+
+      - name: Build Debug (iOS)
+        if: ${{ matrix.ios }}
+        run: cmake --build build-debug --parallel $(sysctl -n hw.ncpu)
+
+      - name: Install Debug (iOS)
+        if: ${{ matrix.ios }}
+        run: cmake --install build-debug
+
+      # Package both versions
       - name: Package
         run: |
           mkdir -p dist
-          cd build/install
-          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}.tar.gz .
+          cd build-release/install
+          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}-release.tar.gz .
+          cd ../../build-debug/install
+          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}-debug.tar.gz .
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}

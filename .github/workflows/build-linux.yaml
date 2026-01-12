@@ -31,11 +31,6 @@ jobs:
             backends: "xnnpack"
             vulkan: "OFF"
             xnnpack: "ON"
-          # TODO: Vulkan builds disabled - volk submodule needs setup
-          # - arch: x64
-          #   backends: "vulkan"
-          #   vulkan: "ON"
-          #   xnnpack: "OFF"
 
     runs-on: ubuntu-22.04
     name: Linux ${{ matrix.arch }} (${{ matrix.backends }})
@@ -65,29 +60,50 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y vulkan-sdk
 
-      - name: Configure CMake
+      # Build Release version
+      - name: Configure CMake (Release)
         run: |
-          cmake -B build -G Ninja \
+          cmake -B build-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
             -DEXECUTORCH_BUILD_MODE=source \
             -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} \
             -DET_BUILD_VULKAN=${{ matrix.vulkan }} \
-            -DCMAKE_INSTALL_PREFIX=build/install
+            -DCMAKE_INSTALL_PREFIX=build-release/install
 
-      - name: Build
-        run: cmake --build build --parallel $(nproc)
+      - name: Build (Release)
+        run: cmake --build build-release --parallel $(nproc)
 
-      - name: Install
-        run: cmake --install build
+      - name: Install (Release)
+        run: cmake --install build-release
 
+      # Build Debug version
+      - name: Configure CMake (Debug)
+        run: |
+          cmake -B build-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
+            -DEXECUTORCH_BUILD_MODE=source \
+            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} \
+            -DET_BUILD_VULKAN=${{ matrix.vulkan }} \
+            -DCMAKE_INSTALL_PREFIX=build-debug/install
+
+      - name: Build (Debug)
+        run: cmake --build build-debug --parallel $(nproc)
+
+      - name: Install (Debug)
+        run: cmake --install build-debug
+
+      # Package both versions
       - name: Package
         run: |
           mkdir -p dist
-          cd build/install
-          tar -czvf ../../dist/libexecutorch_ffi-linux-${{ matrix.arch }}-${{ matrix.backends }}.tar.gz .
+          cd build-release/install
+          tar -czvf ../../dist/libexecutorch_ffi-linux-${{ matrix.arch }}-${{ matrix.backends }}-release.tar.gz .
+          cd ../../build-debug/install
+          tar -czvf ../../dist/libexecutorch_ffi-linux-${{ matrix.arch }}-${{ matrix.backends }}-debug.tar.gz .
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-${{ matrix.arch }}-${{ matrix.backends }}
