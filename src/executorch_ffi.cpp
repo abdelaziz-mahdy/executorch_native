@@ -35,6 +35,15 @@ using namespace executorch::runtime;
 #define EXECUTORCH_VERSION "1.0.1"
 
 /* ============================================================================
+ * Debug Logging
+ * ============================================================================ */
+
+static bool g_debug_enabled = false;  // Simple on/off debug logging
+
+#define ET_LOG(fmt, ...) \
+    do { if (g_debug_enabled) fprintf(stderr, "[ExecuTorch] " fmt "\n", ##__VA_ARGS__); } while(0)
+
+/* ============================================================================
  * Internal Structures
  * ============================================================================ */
 
@@ -52,6 +61,11 @@ struct ETModule {
     int32_t input_count;
     int32_t output_count;
     std::mutex mutex;  // Thread safety
+
+    // Storage for input tensor metadata (kept alive during forward pass)
+    // This fixes the bug where local vectors go out of scope but TensorImpl still references them
+    std::vector<std::vector<executorch::aten::SizesType>> input_sizes_storage;
+    std::vector<std::vector<uint8_t>> input_data_storage;
 };
 
 /* ============================================================================
@@ -117,33 +131,52 @@ static ETDType from_scalar_type(executorch::aten::ScalarType scalar_type) {
     }
 }
 
-// Convert ETTensor to EValue
-static EValue tensor_to_evalue(const ETTensor* tensor) {
+// Convert ETTensor to EValue - stores sizes and data in module to keep alive during forward
+static EValue tensor_to_evalue(const ETTensor* tensor, ETModule* module, int32_t input_index) {
     if (!tensor) {
+        ET_LOG("tensor_to_evalue: tensor is null for input %d", input_index);
         return EValue();
     }
 
-    // Create sizes array
-    std::vector<executorch::aten::SizesType> sizes(tensor->rank);
-    for (int32_t i = 0; i < tensor->rank; i++) {
-        sizes[i] = static_cast<executorch::aten::SizesType>(tensor->shape[i]);
+    ET_LOG("tensor_to_evalue: converting input %d, rank=%d, dtype=%d",
+           input_index, tensor->rank, static_cast<int>(tensor->dtype));
+
+    // Ensure storage vectors are large enough
+    if (static_cast<size_t>(input_index) >= module->input_sizes_storage.size()) {
+        module->input_sizes_storage.resize(input_index + 1);
+        module->input_data_storage.resize(input_index + 1);
     }
 
-    // Create TensorImpl
+    // Store sizes in module (keeps memory alive during forward pass)
+    auto& sizes = module->input_sizes_storage[input_index];
+    sizes.resize(tensor->rank);
+    for (int32_t i = 0; i < tensor->rank; i++) {
+        sizes[i] = static_cast<executorch::aten::SizesType>(tensor->shape[i]);
+        ET_LOG("  shape[%d] = %lld", i, static_cast<long long>(tensor->shape[i]));
+    }
+
+    // Store data in module (keeps memory alive during forward pass)
+    auto& data = module->input_data_storage[input_index];
+    data = tensor->data;  // Copy data
+
+    ET_LOG("  data_size = %zu bytes", data.size());
+
+    // Create TensorImpl using module's stored memory
     auto scalar_type = to_scalar_type(tensor->dtype);
     auto* impl = new executorch::runtime::etensor::TensorImpl(
         scalar_type,
         tensor->rank,
         sizes.data(),
-        const_cast<void*>(static_cast<const void*>(tensor->data.data()))
+        data.data()  // Use module's stored data
     );
 
     return EValue(executorch::aten::Tensor(impl));
 }
 
 // Convert EValue tensor to ETTensor
-static ETTensor* evalue_to_tensor(const EValue& evalue) {
+static ETTensor* evalue_to_tensor(const EValue& evalue, int32_t output_index) {
     if (!evalue.isTensor()) {
+        ET_LOG("evalue_to_tensor: output %d is not a tensor", output_index);
         return nullptr;
     }
 
@@ -151,8 +184,13 @@ static ETTensor* evalue_to_tensor(const EValue& evalue) {
     auto sizes = tensor.sizes();
     auto scalar_type = tensor.scalar_type();
 
+    ET_LOG("evalue_to_tensor: converting output %d, rank=%zu", output_index, sizes.size());
+
     ETTensor* result = new (std::nothrow) ETTensor();
-    if (!result) return nullptr;
+    if (!result) {
+        ET_LOG("evalue_to_tensor: failed to allocate ETTensor");
+        return nullptr;
+    }
 
     result->dtype = from_scalar_type(scalar_type);
     result->rank = static_cast<int32_t>(sizes.size());
@@ -162,14 +200,19 @@ static ETTensor* evalue_to_tensor(const EValue& evalue) {
     for (size_t i = 0; i < sizes.size(); i++) {
         result->shape[i] = sizes[i];
         numel *= sizes[i];
+        ET_LOG("  shape[%zu] = %lld", i, static_cast<long long>(sizes[i]));
     }
 
     size_t data_size = numel * dtype_size(result->dtype);
     result->data.resize(data_size);
 
+    ET_LOG("  data_size = %zu bytes, dtype=%d", data_size, static_cast<int>(result->dtype));
+
     const void* src = tensor.const_data_ptr();
     if (src) {
         memcpy(result->data.data(), src, data_size);
+    } else {
+        ET_LOG("  WARNING: tensor data pointer is null");
     }
 
     return result;
@@ -291,59 +334,75 @@ ET_API ETStatus* et_module_load(
     size_t data_size,
     ETModule** out
 ) {
+    ET_LOG("et_module_load: loading model from buffer, size=%zu bytes", data_size);
+
     if (!out) {
+        ET_LOG("et_module_load: ERROR - out pointer is null");
         return create_status(ET_INVALID_ARGUMENT, "out pointer is null", __func__);
     }
 
     if (!data || data_size == 0) {
+        ET_LOG("et_module_load: ERROR - invalid model data");
         return create_status(ET_INVALID_ARGUMENT, "invalid model data", __func__);
     }
 
     // Allocate module
     ETModule* module = new (std::nothrow) ETModule();
     if (!module) {
+        ET_LOG("et_module_load: ERROR - failed to allocate module");
         return create_status(ET_OUT_OF_MEMORY, "failed to allocate module", __func__);
     }
 
     // Copy model data to keep it alive for BufferDataLoader
+    ET_LOG("et_module_load: copying model data to internal buffer");
     module->model_buffer.assign(data, data + data_size);
 
     // Create BufferDataLoader
+    ET_LOG("et_module_load: creating BufferDataLoader");
     auto data_loader = std::make_unique<BufferDataLoader>(
         module->model_buffer.data(),
         module->model_buffer.size()
     );
 
     // Create Module with the data loader
+    ET_LOG("et_module_load: creating Module");
     module->module = std::make_unique<Module>(std::move(data_loader));
 
     // Load the program
+    ET_LOG("et_module_load: loading program");
     auto load_error = module->module->load();
     if (load_error != Error::Ok) {
+        ET_LOG("et_module_load: ERROR - failed to load ExecuTorch program");
         delete module;
         return create_status(ET_MODEL_LOAD_FAILED, "failed to load ExecuTorch program", __func__);
     }
 
     // Load the forward method
+    ET_LOG("et_module_load: loading forward method");
     auto forward_error = module->module->load_forward();
     if (forward_error != Error::Ok) {
+        ET_LOG("et_module_load: ERROR - failed to load forward method");
         delete module;
         return create_status(ET_MODEL_LOAD_FAILED, "failed to load forward method", __func__);
     }
 
     // Get method metadata
+    ET_LOG("et_module_load: getting method metadata");
     auto method_meta_result = module->module->method_meta("forward");
     if (method_meta_result.ok()) {
         auto& meta = method_meta_result.get();
         module->input_count = static_cast<int32_t>(meta.num_inputs());
         module->output_count = static_cast<int32_t>(meta.num_outputs());
+        ET_LOG("et_module_load: inputs=%d, outputs=%d", module->input_count, module->output_count);
     } else {
+        ET_LOG("et_module_load: WARNING - could not get method metadata, assuming 1 input/output");
         module->input_count = 1;
         module->output_count = 1;
     }
 
     module->loaded = true;
     *out = module;
+    ET_LOG("et_module_load: SUCCESS - module loaded at %p", static_cast<void*>(module));
     return create_ok_status();
 }
 
@@ -351,29 +410,37 @@ ET_API ETStatus* et_module_load_file(
     const char* path,
     ETModule** out
 ) {
+    ET_LOG("et_module_load_file: loading model from file: %s", path ? path : "(null)");
+
     if (!out) {
+        ET_LOG("et_module_load_file: ERROR - out pointer is null");
         return create_status(ET_INVALID_ARGUMENT, "out pointer is null", __func__);
     }
 
     if (!path) {
+        ET_LOG("et_module_load_file: ERROR - path is null");
         return create_status(ET_INVALID_ARGUMENT, "path is null", __func__);
     }
 
     // Allocate module
     ETModule* module = new (std::nothrow) ETModule();
     if (!module) {
+        ET_LOG("et_module_load_file: ERROR - failed to allocate module");
         return create_status(ET_OUT_OF_MEMORY, "failed to allocate module", __func__);
     }
 
     // Create Module directly from file path
+    ET_LOG("et_module_load_file: creating Module with MmapUseMlockIgnoreErrors");
     module->module = std::make_unique<Module>(
         std::string(path),
         Module::LoadMode::MmapUseMlockIgnoreErrors
     );
 
     // Load the program
+    ET_LOG("et_module_load_file: loading program");
     auto load_error = module->module->load();
     if (load_error != Error::Ok) {
+        ET_LOG("et_module_load_file: ERROR - failed to load program from: %s", path);
         delete module;
         char msg[512];
         snprintf(msg, sizeof(msg), "failed to load program from: %s", path);
@@ -381,25 +448,31 @@ ET_API ETStatus* et_module_load_file(
     }
 
     // Load the forward method
+    ET_LOG("et_module_load_file: loading forward method");
     auto forward_error = module->module->load_forward();
     if (forward_error != Error::Ok) {
+        ET_LOG("et_module_load_file: ERROR - failed to load forward method");
         delete module;
         return create_status(ET_MODEL_LOAD_FAILED, "failed to load forward method", __func__);
     }
 
     // Get method metadata
+    ET_LOG("et_module_load_file: getting method metadata");
     auto method_meta_result = module->module->method_meta("forward");
     if (method_meta_result.ok()) {
         auto& meta = method_meta_result.get();
         module->input_count = static_cast<int32_t>(meta.num_inputs());
         module->output_count = static_cast<int32_t>(meta.num_outputs());
+        ET_LOG("et_module_load_file: inputs=%d, outputs=%d", module->input_count, module->output_count);
     } else {
+        ET_LOG("et_module_load_file: WARNING - could not get method metadata, assuming 1 input/output");
         module->input_count = 1;
         module->output_count = 1;
     }
 
     module->loaded = true;
     *out = module;
+    ET_LOG("et_module_load_file: SUCCESS - module loaded at %p", static_cast<void*>(module));
     return create_ok_status();
 }
 
@@ -420,50 +493,69 @@ ET_API ETStatus* et_module_forward(
     ETTensor*** outputs,
     int32_t* output_count
 ) {
+    ET_LOG("et_module_forward: starting forward pass with %d inputs", input_count);
+
     if (!module || !module->loaded) {
+        ET_LOG("et_module_forward: ERROR - module not loaded");
         return create_status(ET_INVALID_STATE, "module not loaded", __func__);
     }
 
     if (!outputs || !output_count) {
+        ET_LOG("et_module_forward: ERROR - invalid output pointers");
         return create_status(ET_INVALID_ARGUMENT, "invalid output pointers", __func__);
     }
 
     if (input_count > 0 && !inputs) {
+        ET_LOG("et_module_forward: ERROR - inputs is null");
         return create_status(ET_INVALID_ARGUMENT, "inputs is null", __func__);
     }
 
     std::lock_guard<std::mutex> lock(module->mutex);
 
-    // Convert input tensors to EValues
+    // Clear previous input storage (will be repopulated during conversion)
+    ET_LOG("et_module_forward: clearing previous input storage");
+    module->input_sizes_storage.clear();
+    module->input_data_storage.clear();
+
+    // Convert input tensors to EValues (stores data in module to keep alive)
+    ET_LOG("et_module_forward: converting %d input tensors", input_count);
     std::vector<EValue> input_evalues;
     input_evalues.reserve(input_count);
 
     for (int32_t i = 0; i < input_count; i++) {
         if (!inputs[i]) {
+            ET_LOG("et_module_forward: ERROR - input tensor %d is null", i);
             return create_status(ET_INVALID_ARGUMENT, "input tensor is null", __func__);
         }
-        input_evalues.push_back(tensor_to_evalue(inputs[i]));
+        // Pass module so tensor data is stored and kept alive
+        input_evalues.push_back(tensor_to_evalue(inputs[i], module, i));
     }
 
     // Execute forward
+    ET_LOG("et_module_forward: executing forward");
     auto result = module->module->forward(input_evalues);
     if (!result.ok()) {
+        ET_LOG("et_module_forward: ERROR - forward execution failed");
         return create_status(ET_INFERENCE_FAILED, "forward execution failed", __func__);
     }
 
     auto& output_evalues = result.get();
     *output_count = static_cast<int32_t>(output_evalues.size());
+    ET_LOG("et_module_forward: forward returned %d outputs", *output_count);
 
     // Allocate output array
     *outputs = static_cast<ETTensor**>(malloc(sizeof(ETTensor*) * (*output_count)));
     if (!*outputs) {
+        ET_LOG("et_module_forward: ERROR - failed to allocate outputs array");
         return create_status(ET_OUT_OF_MEMORY, "failed to allocate outputs array", __func__);
     }
 
     // Convert output EValues to ETTensors
+    ET_LOG("et_module_forward: converting %d output tensors", *output_count);
     for (int32_t i = 0; i < *output_count; i++) {
-        ETTensor* out_tensor = evalue_to_tensor(output_evalues[i]);
+        ETTensor* out_tensor = evalue_to_tensor(output_evalues[i], i);
         if (!out_tensor) {
+            ET_LOG("et_module_forward: ERROR - failed to convert output tensor %d", i);
             // Clean up
             for (int32_t j = 0; j < i; j++) {
                 delete (*outputs)[j];
@@ -476,12 +568,15 @@ ET_API ETStatus* et_module_forward(
         (*outputs)[i] = out_tensor;
     }
 
+    ET_LOG("et_module_forward: SUCCESS - completed forward pass");
     return create_ok_status();
 }
 
 ET_API void et_module_free(ETModule* module) {
     if (module) {
+        ET_LOG("et_module_free: freeing module at %p", static_cast<void*>(module));
         delete module;
+        ET_LOG("et_module_free: module freed");
     }
 }
 
@@ -568,8 +663,9 @@ ET_API void et_string_free(char* str) {
     if (str) free(str);
 }
 
-static int32_t g_log_level = 1;
-
-ET_API void et_set_log_level(int32_t level) {
-    g_log_level = level;
+ET_API void et_set_debug_enabled(int32_t enabled) {
+    g_debug_enabled = (enabled != 0);
+    if (g_debug_enabled) {
+        fprintf(stderr, "[ExecuTorch] Debug logging enabled\n");
+    }
 }

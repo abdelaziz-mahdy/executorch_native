@@ -137,14 +137,22 @@ jobs:
         with:
           path: artifacts
 
-      - name: Collect files
+      - name: Collect files and generate hashes
         run: |
           mkdir -p release
           find artifacts -name "*.tar.gz" -exec cp {} release/ \;
-          ls -la release/
+          find artifacts -name "*.zip" -exec cp {} release/ \; 2>/dev/null || true
+          cd release
+          # Generate SHA256 hash files for each artifact
+          for f in *.tar.gz *.zip 2>/dev/null; do
+            [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
+          done
+          ls -la
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.tar.gz
+          files: |
+            release/*.tar.gz
+            release/*.sha256
           generate_release_notes: true

@@ -293,11 +293,11 @@ ET_API void et_tensor_array_free(ETTensor** tensors, int32_t count);
 ET_API void et_string_free(char* str);
 
 /**
- * Set debug logging level.
+ * Enable or disable debug logging.
  *
- * @param level  0=off, 1=error, 2=warn, 3=info, 4=debug
+ * @param enabled  0=off, non-zero=on
  */
-ET_API void et_set_log_level(int32_t level);
+ET_API void et_set_debug_enabled(int32_t enabled);
 
 #ifdef __cplusplus
 }
