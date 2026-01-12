@@ -2,6 +2,17 @@
 
 C/C++ FFI wrapper for ExecuTorch, designed for use with Flutter/Dart via dart:ffi.
 
+## Versioning
+
+This project uses a 4-part version scheme: `X.Y.Z.W`
+
+- **X.Y.Z** - ExecuTorch version (e.g., `1.0.1`)
+- **W** - Build iteration for this ExecuTorch version (e.g., `1`, `2`, `3`)
+
+Example: `v1.0.1.1` means ExecuTorch 1.0.1, first build iteration.
+
+When ExecuTorch releases a new version, the first three numbers update and W resets to 1.
+
 ## Overview
 
 This repository provides:
@@ -21,18 +32,21 @@ This repository provides:
 
 ## Pre-built Binaries
 
-Pre-built binaries are available as GitHub Releases:
+Pre-built binaries are available as GitHub Releases. Both **Release** and **Debug** builds are provided for each platform.
 
 ```
-libexecutorch_ffi-{platform}-{arch}-{backends}.tar.gz
-libexecutorch_ffi-{platform}-{arch}-{backends}.tar.gz.sha256
+libexecutorch_ffi-{platform}-{arch}-{backends}-{build_type}.tar.gz
+libexecutorch_ffi-{platform}-{arch}-{backends}-{build_type}.tar.gz.sha256
 ```
+
+Where `{build_type}` is either `release` or `debug`.
 
 Examples:
-- `libexecutorch_ffi-macos-arm64-xnnpack-coreml-mps.tar.gz`
-- `libexecutorch_ffi-macos-arm64-xnnpack-coreml-mps.tar.gz.sha256`
-- `libexecutorch_ffi-windows-x64-xnnpack.zip`
-- `libexecutorch_ffi-windows-x64-xnnpack.zip.sha256`
+- `libexecutorch_ffi-macos-arm64-xnnpack-coreml-mps-release.tar.gz`
+- `libexecutorch_ffi-macos-arm64-xnnpack-coreml-mps-debug.tar.gz`
+- `libexecutorch_ffi-android-arm64-v8a-xnnpack-release.tar.gz`
+- `libexecutorch_ffi-windows-x64-xnnpack-release.zip`
+- `libexecutorch_ffi-windows-x64-xnnpack-debug.zip`
 
 ### Hash Verification
 
@@ -138,5 +152,5 @@ MIT License - see LICENSE file.
 
 ## Related Projects
 
-- [executorch_flutter](https://github.com/user/executorch_flutter) - Flutter plugin using this FFI
+- [executorch_flutter](https://github.com/abdelaziz-mahdy/executorch_flutter) - Flutter plugin using this FFI
 - [ExecuTorch](https://github.com/pytorch/executorch) - PyTorch on-device inference
