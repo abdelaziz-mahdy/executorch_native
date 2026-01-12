@@ -83,7 +83,8 @@ cmake --build . --parallel
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `EXECUTORCH_VERSION` | 1.0.1 | ExecuTorch version |
+| `EXECUTORCH_VERSION` | 1.0.1 | ExecuTorch source version (for source builds) |
+| `EXECUTORCH_PREBUILT_VERSION` | 1.0.1.3 | Prebuilt release version (for prebuilt downloads) |
 | `EXECUTORCH_BUILD_MODE` | prebuilt | `prebuilt` or `source` |
 | `ET_BUILD_XNNPACK` | ON | Enable XNNPACK backend |
 | `ET_BUILD_COREML` | OFF (ON for Apple) | Enable CoreML backend |

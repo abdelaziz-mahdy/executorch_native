@@ -35,7 +35,7 @@ endif()
 # Build the filename based on platform, arch, variant, and build type
 set(_filename
     "libexecutorch_ffi-${EXECUTORCH_PLATFORM}-${EXECUTORCH_ARCH}-${EXECUTORCH_VARIANT}-${_build_type_lower}.${_archive_ext}")
-set(_base_url "${EXECUTORCH_PREBUILT_URL_BASE}/v${EXECUTORCH_VERSION}/${_filename}")
+set(_base_url "${EXECUTORCH_PREBUILT_URL_BASE}/v${EXECUTORCH_PREBUILT_VERSION}/${_filename}")
 
 # Generate cache-busting timestamp (changes each configure)
 string(TIMESTAMP _cache_bust "%Y%m%d%H%M%S")
@@ -45,7 +45,7 @@ set(_hash_url "${_base_url}.sha256?v=${_cache_bust}")
 message(STATUS "--------------------------")
 message(STATUS "Pre-built Download Configuration:")
 message(STATUS "  Repository: ${EXECUTORCH_PREBUILT_REPO}")
-message(STATUS "  Version: v${EXECUTORCH_VERSION}")
+message(STATUS "  Version: v${EXECUTORCH_PREBUILT_VERSION}")
 message(STATUS "  Platform: ${EXECUTORCH_PLATFORM}")
 message(STATUS "  Architecture: ${EXECUTORCH_ARCH}")
 message(STATUS "  Variant: ${EXECUTORCH_VARIANT}")
@@ -118,7 +118,7 @@ endif()
 
 # Cache directory includes version for cache busting across versions
 set(_cache_dir
-    "${_cache_base_dir}/prebuilt-${EXECUTORCH_VERSION}-${EXECUTORCH_PLATFORM}-${EXECUTORCH_ARCH}")
+    "${_cache_base_dir}/prebuilt-${EXECUTORCH_PREBUILT_VERSION}-${EXECUTORCH_PLATFORM}-${EXECUTORCH_ARCH}")
 set(FETCHCONTENT_BASE_DIR "${_cache_dir}" CACHE PATH
     "FetchContent cache directory" FORCE)
 message(STATUS "Cache directory: ${FETCHCONTENT_BASE_DIR}")
