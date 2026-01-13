@@ -15,6 +15,7 @@ ARCH="arm64"
 PLATFORM="ios"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CACHE_DIR="${PROJECT_DIR}/.cache"
 
 # iOS: all combinations of coreml (2^1 = 2, no MPS/Vulkan)
 # Format: backends:coreml
@@ -72,6 +73,7 @@ build_variant() {
     -DCMAKE_BUILD_TYPE="${build_type}" \
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
+    -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_MPS=OFF \

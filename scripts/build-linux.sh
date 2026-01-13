@@ -15,6 +15,7 @@ ARCH="x64"
 PLATFORM="linux"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CACHE_DIR="${PROJECT_DIR}/.cache"
 
 # All variants to build: backends:vulkan
 VARIANTS=(
@@ -70,6 +71,7 @@ build_variant() {
     -DCMAKE_BUILD_TYPE="${build_type}" \
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
+    -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_COREML=OFF \

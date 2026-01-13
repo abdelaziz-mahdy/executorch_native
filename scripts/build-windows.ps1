@@ -29,6 +29,7 @@ $Arch = "x64"
 $Platform = "windows"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
+$CacheDir = "$ProjectDir\.cache"
 
 # All variants to build: backends:vulkan
 $Variants = @(
@@ -92,6 +93,7 @@ function Build-Variant {
         -DCMAKE_BUILD_TYPE=$BuildType `
         "-DEXECUTORCH_VERSION:STRING=$Version" `
         -DEXECUTORCH_BUILD_MODE=source `
+        "-DEXECUTORCH_CACHE_DIR=$CacheDir" `
         -DET_BUILD_XNNPACK=ON `
         -DET_BUILD_VULKAN=$Vulkan `
         -DET_BUILD_COREML=OFF `

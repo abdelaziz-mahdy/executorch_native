@@ -16,6 +16,7 @@ VERSION="${1:-1.0.1}"
 PLATFORM="android"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CACHE_DIR="${PROJECT_DIR}/.cache"
 
 # Android ABIs to build
 ABIS=(
@@ -83,6 +84,7 @@ build_variant() {
     -DCMAKE_BUILD_TYPE="${build_type}" \
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
+    -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \

@@ -14,6 +14,7 @@ VERSION="${1:-1.0.1}"
 PLATFORM="macos"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CACHE_DIR="${PROJECT_DIR}/.cache"
 
 # arm64: all combinations of coreml/mps/vulkan (2^3 = 8)
 # Format: backends:coreml:mps:vulkan
@@ -86,6 +87,7 @@ build_variant() {
     -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
+    -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_MPS="${mps}" \

@@ -35,7 +35,13 @@ endif()
 # ExecuTorch Source Configuration
 # ============================================================================
 
-set(executorch_SOURCE_DIR ${CMAKE_BINARY_DIR}/executorch)
+# Use shared source directory when cache is enabled to avoid re-cloning
+# for each build variant. Binary dir must remain per-build for different configs.
+if(DEFINED EXECUTORCH_CACHE_DIR AND NOT "${EXECUTORCH_CACHE_DIR}" STREQUAL "")
+    set(executorch_SOURCE_DIR "${EXECUTORCH_CACHE_DIR}/executorch-v${EXECUTORCH_VERSION}")
+else()
+    set(executorch_SOURCE_DIR ${CMAKE_BINARY_DIR}/executorch)
+endif()
 set(executorch_BINARY_DIR ${CMAKE_BINARY_DIR}/_deps/executorch_fetch-build)
 
 # ExecuTorch build options (must be set before FetchContent_MakeAvailable)
@@ -130,43 +136,27 @@ else()
 
     set(FETCHCONTENT_QUIET FALSE)
 
-    # Build list of submodules based on enabled backends
+    # Fetch ALL possible submodules upfront to support shared source directory
+    # When using EXECUTORCH_CACHE_DIR, the source is shared between builds with
+    # different backend options. We need all submodules present so that any
+    # variant can build from the cached source.
     set(_git_submodules
+        # Core dependencies
         third-party/flatbuffers
         third-party/flatcc
         third-party/json
         third-party/gflags
-    )
-
-    # XNNPACK submodules (always needed as base)
-    list(APPEND _git_submodules
+        # XNNPACK backend (always needed as base)
         backends/xnnpack/third-party/XNNPACK
         backends/xnnpack/third-party/cpuinfo
         backends/xnnpack/third-party/pthreadpool
         backends/xnnpack/third-party/FP16
         backends/xnnpack/third-party/FXdiv
+        # Vulkan backend
+        backends/vulkan/third-party/volk
+        backends/vulkan/third-party/Vulkan-Headers
+        # Note: CoreML and MPS use system frameworks, no external submodules
     )
-
-    # Vulkan submodules
-    if(ET_BUILD_VULKAN)
-        message(STATUS "Including Vulkan submodules...")
-        list(APPEND _git_submodules
-            backends/vulkan/third-party/volk
-            backends/vulkan/third-party/Vulkan-Headers
-        )
-    endif()
-
-    # CoreML submodules (if needed)
-    if(ET_BUILD_COREML)
-        message(STATUS "Including CoreML submodules...")
-        # CoreML doesn't have external submodules, uses system frameworks
-    endif()
-
-    # MPS submodules (if needed)
-    if(ET_BUILD_MPS)
-        message(STATUS "Including MPS submodules...")
-        # MPS doesn't have external submodules, uses system frameworks
-    endif()
 
     message(STATUS "Git submodules to fetch: ${_git_submodules}")
 
