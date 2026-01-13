@@ -23,19 +23,8 @@ env:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # x64 with XNNPACK
-          - arch: x64
-            cmake_arch: x64
-            backends: "xnnpack"
-            vulkan: "OFF"
-            xnnpack: "ON"
-
     runs-on: windows-latest
-    name: Windows ${{ matrix.arch }} (${{ matrix.backends }})
+    name: Windows x64 (all variants)
 
     steps:
       - name: Checkout
@@ -46,76 +35,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
-        # Install CPU-only torch (includes torchgen with proper model module)
-        # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
-        run: pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install Vulkan SDK
-        if: matrix.vulkan == 'ON'
+      - name: Run build script
         shell: pwsh
         run: |
-          $vulkanUrl = "https://sdk.lunarg.com/sdk/download/${{ env.VULKAN_SDK_VERSION }}/windows/VulkanSDK-${{ env.VULKAN_SDK_VERSION }}-Installer.exe"
-          $installerPath = "$env:TEMP\VulkanSDK-Installer.exe"
-          Write-Host "Downloading Vulkan SDK from $vulkanUrl"
-          Invoke-WebRequest -Uri $vulkanUrl -OutFile $installerPath
-          Write-Host "Installing Vulkan SDK..."
-          Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait
-          $vulkanPath = "C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}"
-          echo "VULKAN_SDK=$vulkanPath" >> $env:GITHUB_ENV
-          echo "$vulkanPath\Bin" >> $env:GITHUB_PATH
-
-      # Build Release version
-      - name: Configure CMake (Release)
-        run: |
-          # Use ClangCL toolset to avoid MSVC flag compatibility issues
-          # (ExecuTorch uses GCC-style warning flags that MSVC doesn't understand)
-          cmake -B build-release `
-            -A ${{ matrix.cmake_arch }} `
-            -T ClangCL `
-            -DCMAKE_BUILD_TYPE=Release `
-            "-DEXECUTORCH_VERSION:STRING=${{ env.EXECUTORCH_VERSION }}" `
-            -DEXECUTORCH_BUILD_MODE=source `
-            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} `
-            -DET_BUILD_VULKAN=${{ matrix.vulkan }} `
-            -DCMAKE_INSTALL_PREFIX=build-release/install
-
-      - name: Build (Release)
-        run: cmake --build build-release --config Release --parallel
-
-      - name: Install (Release)
-        run: cmake --install build-release --config Release
-
-      # Build Debug version
-      - name: Configure CMake (Debug)
-        run: |
-          cmake -B build-debug `
-            -A ${{ matrix.cmake_arch }} `
-            -T ClangCL `
-            -DCMAKE_BUILD_TYPE=Debug `
-            "-DEXECUTORCH_VERSION:STRING=${{ env.EXECUTORCH_VERSION }}" `
-            -DEXECUTORCH_BUILD_MODE=source `
-            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} `
-            -DET_BUILD_VULKAN=${{ matrix.vulkan }} `
-            -DCMAKE_INSTALL_PREFIX=build-debug/install
-
-      - name: Build (Debug)
-        run: cmake --build build-debug --config Debug --parallel
-
-      - name: Install (Debug)
-        run: cmake --install build-debug --config Debug
-
-      # Package both versions
-      - name: Package
-        run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Compress-Archive -Path build-release/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}-release.zip
-          Compress-Archive -Path build-debug/install/* -DestinationPath dist/libexecutorch_ffi-windows-${{ matrix.arch }}-${{ matrix.backends }}-debug.zip
+          .\scripts\build-windows.ps1 -Version "${{ env.EXECUTORCH_VERSION }}" -VulkanSdkVersion "${{ env.VULKAN_SDK_VERSION }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.arch }}-${{ matrix.backends }}
+          name: windows-x64-all
           path: dist/*.zip
           retention-days: 7
 

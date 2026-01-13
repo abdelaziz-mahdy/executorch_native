@@ -22,19 +22,8 @@ env:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # arm64-v8a with XNNPACK
-          - abi: arm64-v8a
-            backends: "xnnpack"
-          # x86_64 with XNNPACK (for emulator)
-          - abi: x86_64
-            backends: "xnnpack"
-
     runs-on: ubuntu-latest
-    name: Android ${{ matrix.abi }} (${{ matrix.backends }})
+    name: Android (arm64-v8a + x86_64)
 
     steps:
       - name: Checkout
@@ -45,67 +34,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Run build script
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-          # Install CPU-only torch (includes torchgen with proper model module)
-          # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
-          pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-      # Build Release version
-      - name: Configure CMake (Release)
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=${{ matrix.abi }} \
-            -DANDROID_PLATFORM=android-23 \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DCMAKE_INSTALL_PREFIX=build-release/install
-
-      - name: Build (Release)
-        run: cmake --build build-release --parallel $(nproc)
-
-      - name: Install (Release)
-        run: cmake --install build-release
-
-      # Build Debug version
-      - name: Configure CMake (Debug)
-        run: |
-          cmake -B build-debug -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=${{ matrix.abi }} \
-            -DANDROID_PLATFORM=android-23 \
-            -DANDROID_STL=c++_shared \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DCMAKE_INSTALL_PREFIX=build-debug/install
-
-      - name: Build (Debug)
-        run: cmake --build build-debug --parallel $(nproc)
-
-      - name: Install (Debug)
-        run: cmake --install build-debug
-
-      # Package both versions
-      - name: Package
-        run: |
-          mkdir -p dist
-          cd build-release/install
-          tar -czvf ../../dist/libexecutorch_ffi-android-${{ matrix.abi }}-${{ matrix.backends }}-release.tar.gz .
-          cd ../../build-debug/install
-          tar -czvf ../../dist/libexecutorch_ffi-android-${{ matrix.abi }}-${{ matrix.backends }}-debug.tar.gz .
+          chmod +x scripts/build-android.sh
+          ./scripts/build-android.sh "${{ env.EXECUTORCH_VERSION }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-${{ matrix.abi }}-${{ matrix.backends }}
+          name: android-all
           path: dist/*.tar.gz
           retention-days: 7
 

@@ -22,18 +22,8 @@ env:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # x64 with XNNPACK
-          - arch: x64
-            backends: "xnnpack"
-            vulkan: "OFF"
-            xnnpack: "ON"
-
     runs-on: ubuntu-22.04
-    name: Linux ${{ matrix.arch }} (${{ matrix.backends }})
+    name: Linux x64 (all variants)
 
     steps:
       - name: Checkout
@@ -44,69 +34,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Run build script
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build
-          # Install CPU-only torch (includes torchgen with proper model module)
-          # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
-          pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install Vulkan SDK
-        if: matrix.vulkan == 'ON'
-        run: |
-          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
-
-      # Build Release version
-      - name: Configure CMake (Release)
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} \
-            -DET_BUILD_VULKAN=${{ matrix.vulkan }} \
-            -DCMAKE_INSTALL_PREFIX=build-release/install
-
-      - name: Build (Release)
-        run: cmake --build build-release --parallel $(nproc)
-
-      - name: Install (Release)
-        run: cmake --install build-release
-
-      # Build Debug version
-      - name: Configure CMake (Debug)
-        run: |
-          cmake -B build-debug -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=${{ matrix.xnnpack }} \
-            -DET_BUILD_VULKAN=${{ matrix.vulkan }} \
-            -DCMAKE_INSTALL_PREFIX=build-debug/install
-
-      - name: Build (Debug)
-        run: cmake --build build-debug --parallel $(nproc)
-
-      - name: Install (Debug)
-        run: cmake --install build-debug
-
-      # Package both versions
-      - name: Package
-        run: |
-          mkdir -p dist
-          cd build-release/install
-          tar -czvf ../../dist/libexecutorch_ffi-linux-${{ matrix.arch }}-${{ matrix.backends }}-release.tar.gz .
-          cd ../../build-debug/install
-          tar -czvf ../../dist/libexecutorch_ffi-linux-${{ matrix.arch }}-${{ matrix.backends }}-debug.tar.gz .
+          chmod +x scripts/build-linux.sh
+          ./scripts/build-linux.sh "${{ env.EXECUTORCH_VERSION }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}-${{ matrix.backends }}
+          name: linux-x64-all
           path: dist/*.tar.gz
           retention-days: 7
 

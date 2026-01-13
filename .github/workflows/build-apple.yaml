@@ -21,28 +21,9 @@ env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # macOS arm64
-          - runner: macos-15
-            platform: macos
-            arch: arm64
-            backends: "xnnpack-coreml-mps"
-            mps: "ON"
-            ios: false
-          # iOS arm64
-          - runner: macos-15
-            platform: ios
-            arch: arm64
-            backends: "xnnpack-coreml"
-            mps: "OFF"
-            ios: true
-
-    runs-on: ${{ matrix.runner }}
-    name: ${{ matrix.platform }} ${{ matrix.arch }} (${{ matrix.backends }})
+  build-macos:
+    runs-on: macos-15
+    name: macOS (arm64 + x86_64, all variants)
 
     steps:
       - name: Checkout
@@ -53,127 +34,45 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
-        # Install CPU-only torch (includes torchgen with proper model module)
-        # Use --extra-index-url to get pyyaml from PyPI and torch from PyTorch index
-        run: pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install Ninja (iOS)
-        if: ${{ matrix.ios }}
-        run: brew install ninja
-
-      # Build Release version (macOS)
-      - name: Configure CMake Release (macOS)
-        if: ${{ !matrix.ios }}
+      - name: Run build script
         run: |
-          cmake -B build-release \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DET_BUILD_COREML=ON \
-            -DET_BUILD_MPS=${{ matrix.mps }} \
-            -DCMAKE_INSTALL_PREFIX=build-release/install
-
-      - name: Build Release (macOS)
-        if: ${{ !matrix.ios }}
-        run: cmake --build build-release --config Release --parallel $(sysctl -n hw.ncpu)
-
-      - name: Install Release (macOS)
-        if: ${{ !matrix.ios }}
-        run: cmake --install build-release --config Release
-
-      # Build Debug version (macOS)
-      - name: Configure CMake Debug (macOS)
-        if: ${{ !matrix.ios }}
-        run: |
-          cmake -B build-debug \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DET_BUILD_COREML=ON \
-            -DET_BUILD_MPS=${{ matrix.mps }} \
-            -DCMAKE_INSTALL_PREFIX=build-debug/install
-
-      - name: Build Debug (macOS)
-        if: ${{ !matrix.ios }}
-        run: cmake --build build-debug --config Debug --parallel $(sysctl -n hw.ncpu)
-
-      - name: Install Debug (macOS)
-        if: ${{ !matrix.ios }}
-        run: cmake --install build-debug --config Debug
-
-      # Build Release version (iOS)
-      - name: Configure CMake Release (iOS)
-        if: ${{ matrix.ios }}
-        run: |
-          cmake -B build-release -G Ninja \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DET_BUILD_COREML=ON \
-            -DET_BUILD_MPS=OFF \
-            -DCMAKE_INSTALL_PREFIX=build-release/install
-
-      - name: Build Release (iOS)
-        if: ${{ matrix.ios }}
-        run: cmake --build build-release --parallel $(sysctl -n hw.ncpu)
-
-      - name: Install Release (iOS)
-        if: ${{ matrix.ios }}
-        run: cmake --install build-release
-
-      # Build Debug version (iOS)
-      - name: Configure CMake Debug (iOS)
-        if: ${{ matrix.ios }}
-        run: |
-          cmake -B build-debug -G Ninja \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path) \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DEXECUTORCH_VERSION:STRING="${{ env.EXECUTORCH_VERSION }}" \
-            -DEXECUTORCH_BUILD_MODE=source \
-            -DET_BUILD_XNNPACK=ON \
-            -DET_BUILD_COREML=ON \
-            -DET_BUILD_MPS=OFF \
-            -DCMAKE_INSTALL_PREFIX=build-debug/install
-
-      - name: Build Debug (iOS)
-        if: ${{ matrix.ios }}
-        run: cmake --build build-debug --parallel $(sysctl -n hw.ncpu)
-
-      - name: Install Debug (iOS)
-        if: ${{ matrix.ios }}
-        run: cmake --install build-debug
-
-      # Package both versions
-      - name: Package
-        run: |
-          mkdir -p dist
-          cd build-release/install
-          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}-release.tar.gz .
-          cd ../../build-debug/install
-          tar -czvf ../../dist/libexecutorch_ffi-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}-debug.tar.gz .
+          chmod +x scripts/build-macos.sh
+          ./scripts/build-macos.sh "${{ env.EXECUTORCH_VERSION }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.backends }}
+          name: macos-all
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  build-ios:
+    runs-on: macos-15
+    name: iOS arm64 (all variants)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run build script
+        run: |
+          chmod +x scripts/build-ios.sh
+          ./scripts/build-ios.sh "${{ env.EXECUTORCH_VERSION }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-all
           path: dist/*.tar.gz
           retention-days: 7
 
   release:
-    needs: build
+    needs: [build-macos, build-ios]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
