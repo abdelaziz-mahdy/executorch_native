@@ -37,8 +37,10 @@ endif()
 
 # Use shared source directory when cache is enabled to avoid re-cloning
 # for each build variant. Binary dir must remain per-build for different configs.
+# IMPORTANT: ExecuTorch requires the directory to be named exactly "executorch"
+# See: https://github.com/pytorch/executorch/issues/6475
 if(DEFINED EXECUTORCH_CACHE_DIR AND NOT "${EXECUTORCH_CACHE_DIR}" STREQUAL "")
-    set(executorch_SOURCE_DIR "${EXECUTORCH_CACHE_DIR}/executorch-v${EXECUTORCH_VERSION}")
+    set(executorch_SOURCE_DIR "${EXECUTORCH_CACHE_DIR}/executorch")
 else()
     set(executorch_SOURCE_DIR ${CMAKE_BINARY_DIR}/executorch)
 endif()
