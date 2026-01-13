@@ -16,26 +16,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
-# arm64: all combinations of coreml/mps/vulkan (2^3 = 8)
+# arm64: combinations of coreml/mps (Vulkan disabled - requires glslc compiler setup)
 # Format: backends:coreml:mps:vulkan
 ARM64_VARIANTS=(
   "xnnpack:OFF:OFF:OFF"
   "xnnpack-coreml:ON:OFF:OFF"
   "xnnpack-mps:OFF:ON:OFF"
-  "xnnpack-vulkan:OFF:OFF:ON"
   "xnnpack-coreml-mps:ON:ON:OFF"
-  "xnnpack-coreml-vulkan:ON:OFF:ON"
-  "xnnpack-mps-vulkan:OFF:ON:ON"
-  "xnnpack-coreml-mps-vulkan:ON:ON:ON"
+  # Vulkan variants disabled - TODO: Enable once Vulkan build is properly configured
+  # "xnnpack-vulkan:OFF:OFF:ON"
+  # "xnnpack-coreml-vulkan:ON:OFF:ON"
+  # "xnnpack-mps-vulkan:OFF:ON:ON"
+  # "xnnpack-coreml-mps-vulkan:ON:ON:ON"
 )
 
-# x86_64: all combinations of coreml/vulkan (2^2 = 4, no MPS on Intel)
+# x86_64: coreml only (no MPS on Intel, Vulkan disabled)
 # Format: backends:coreml:vulkan
 X64_VARIANTS=(
   "xnnpack:OFF:OFF"
   "xnnpack-coreml:ON:OFF"
-  "xnnpack-vulkan:OFF:ON"
-  "xnnpack-coreml-vulkan:ON:ON"
+  # Vulkan variants disabled - TODO: Enable once Vulkan build is properly configured
+  # "xnnpack-vulkan:OFF:ON"
+  # "xnnpack-coreml-vulkan:ON:ON"
 )
 
 echo "============================================================"

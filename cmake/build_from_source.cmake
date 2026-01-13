@@ -40,7 +40,9 @@ endif()
 # IMPORTANT: ExecuTorch requires the directory to be named exactly "executorch"
 # See: https://github.com/pytorch/executorch/issues/6475
 if(DEFINED EXECUTORCH_CACHE_DIR AND NOT "${EXECUTORCH_CACHE_DIR}" STREQUAL "")
-    set(executorch_SOURCE_DIR "${EXECUTORCH_CACHE_DIR}/executorch")
+    # Normalize path to use forward slashes (fixes Windows path issues)
+    file(TO_CMAKE_PATH "${EXECUTORCH_CACHE_DIR}" _normalized_cache_dir)
+    set(executorch_SOURCE_DIR "${_normalized_cache_dir}/executorch")
 else()
     set(executorch_SOURCE_DIR ${CMAKE_BINARY_DIR}/executorch)
 endif()
@@ -138,10 +140,9 @@ else()
 
     set(FETCHCONTENT_QUIET FALSE)
 
-    # Fetch ALL possible submodules upfront to support shared source directory
-    # When using EXECUTORCH_CACHE_DIR, the source is shared between builds with
-    # different backend options. We need all submodules present so that any
-    # variant can build from the cached source.
+    # Fetch submodules needed for build
+    # Note: Vulkan submodules are not included - Vulkan builds are disabled
+    # because they require glslc compiler and complex shader compilation setup
     set(_git_submodules
         # Core dependencies
         third-party/flatbuffers
@@ -154,10 +155,8 @@ else()
         backends/xnnpack/third-party/pthreadpool
         backends/xnnpack/third-party/FP16
         backends/xnnpack/third-party/FXdiv
-        # Vulkan backend
-        backends/vulkan/third-party/volk
-        backends/vulkan/third-party/Vulkan-Headers
         # Note: CoreML and MPS use system frameworks, no external submodules
+        # Vulkan submodules (volk, Vulkan-Headers) not included - Vulkan builds disabled
     )
 
     message(STATUS "Git submodules to fetch: ${_git_submodules}")

@@ -18,9 +18,11 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
 # All variants to build: backends:vulkan
+# NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
+# ExecuTorch's Vulkan build needs special setup (see their .ci/scripts/setup-vulkan-linux-deps.sh)
 VARIANTS=(
   "xnnpack:OFF"
-  "xnnpack-vulkan:ON"
+  # "xnnpack-vulkan:ON"  # TODO: Enable once Vulkan build is properly configured
 )
 
 echo "============================================================"

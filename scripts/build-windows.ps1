@@ -32,9 +32,10 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 $CacheDir = "$ProjectDir\.cache"
 
 # All variants to build: backends:vulkan
+# NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
 $Variants = @(
-    @{ Backends = "xnnpack"; Vulkan = "OFF" },
-    @{ Backends = "xnnpack-vulkan"; Vulkan = "ON" }
+    @{ Backends = "xnnpack"; Vulkan = "OFF" }
+    # @{ Backends = "xnnpack-vulkan"; Vulkan = "ON" }  # TODO: Enable once Vulkan build is properly configured
 )
 
 Write-Host "============================================================"
@@ -53,33 +54,8 @@ function Install-Dependencies {
     # Install Python dependencies
     pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-    # Install Vulkan SDK using Chocolatey (more reliable on CI)
-    Write-Host "Installing Vulkan SDK via Chocolatey..."
-    try {
-        choco install vulkan-sdk --version=$VulkanSdkVersion -y --no-progress
-
-        # Find where Vulkan SDK was installed
-        $VulkanPath = "C:\VulkanSDK\$VulkanSdkVersion"
-        if (-not (Test-Path $VulkanPath)) {
-            # Try common alternative locations
-            $VulkanPath = "C:\VulkanSDK"
-            if (Test-Path $VulkanPath) {
-                $VulkanPath = Get-ChildItem $VulkanPath -Directory | Select-Object -First 1 -ExpandProperty FullName
-            }
-        }
-
-        if (Test-Path $VulkanPath) {
-            $env:VULKAN_SDK = $VulkanPath
-            $env:PATH = "$VulkanPath\Bin;$env:PATH"
-            Write-Host "Vulkan SDK installed at: $VulkanPath"
-        } else {
-            Write-Host "WARNING: Vulkan SDK not found at expected location, Vulkan builds may fail"
-        }
-    }
-    catch {
-        Write-Host "WARNING: Failed to install Vulkan SDK via Chocolatey: $_"
-        Write-Host "Vulkan builds will be skipped"
-    }
+    # NOTE: Vulkan SDK installation is disabled since Vulkan builds are not enabled
+    # To enable Vulkan builds, uncomment the xnnpack-vulkan variant and install the SDK
 
     Write-Host "Dependencies installed successfully"
 }
