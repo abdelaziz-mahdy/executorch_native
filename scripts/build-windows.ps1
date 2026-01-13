@@ -53,20 +53,33 @@ function Install-Dependencies {
     # Install Python dependencies
     pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-    # Install Vulkan SDK
-    Write-Host "Installing Vulkan SDK $VulkanSdkVersion..."
-    $VulkanUrl = "https://sdk.lunarg.com/sdk/download/$VulkanSdkVersion/windows/VulkanSDK-$VulkanSdkVersion-Installer.exe"
-    $InstallerPath = "$env:TEMP\VulkanSDK-Installer.exe"
+    # Install Vulkan SDK using Chocolatey (more reliable on CI)
+    Write-Host "Installing Vulkan SDK via Chocolatey..."
+    try {
+        choco install vulkan-sdk --version=$VulkanSdkVersion -y --no-progress
 
-    Write-Host "Downloading Vulkan SDK from $VulkanUrl"
-    Invoke-WebRequest -Uri $VulkanUrl -OutFile $InstallerPath
+        # Find where Vulkan SDK was installed
+        $VulkanPath = "C:\VulkanSDK\$VulkanSdkVersion"
+        if (-not (Test-Path $VulkanPath)) {
+            # Try common alternative locations
+            $VulkanPath = "C:\VulkanSDK"
+            if (Test-Path $VulkanPath) {
+                $VulkanPath = Get-ChildItem $VulkanPath -Directory | Select-Object -First 1 -ExpandProperty FullName
+            }
+        }
 
-    Write-Host "Installing Vulkan SDK..."
-    Start-Process -FilePath $InstallerPath -ArgumentList "/S" -Wait
-
-    $VulkanPath = "C:\VulkanSDK\$VulkanSdkVersion"
-    $env:VULKAN_SDK = $VulkanPath
-    $env:PATH = "$VulkanPath\Bin;$env:PATH"
+        if (Test-Path $VulkanPath) {
+            $env:VULKAN_SDK = $VulkanPath
+            $env:PATH = "$VulkanPath\Bin;$env:PATH"
+            Write-Host "Vulkan SDK installed at: $VulkanPath"
+        } else {
+            Write-Host "WARNING: Vulkan SDK not found at expected location, Vulkan builds may fail"
+        }
+    }
+    catch {
+        Write-Host "WARNING: Failed to install Vulkan SDK via Chocolatey: $_"
+        Write-Host "Vulkan builds will be skipped"
+    }
 
     Write-Host "Dependencies installed successfully"
 }
