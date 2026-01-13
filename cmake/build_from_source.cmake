@@ -130,6 +130,46 @@ else()
 
     set(FETCHCONTENT_QUIET FALSE)
 
+    # Build list of submodules based on enabled backends
+    set(_git_submodules
+        third-party/flatbuffers
+        third-party/flatcc
+        third-party/json
+        third-party/gflags
+    )
+
+    # XNNPACK submodules (always needed as base)
+    list(APPEND _git_submodules
+        backends/xnnpack/third-party/XNNPACK
+        backends/xnnpack/third-party/cpuinfo
+        backends/xnnpack/third-party/pthreadpool
+        backends/xnnpack/third-party/FP16
+        backends/xnnpack/third-party/FXdiv
+    )
+
+    # Vulkan submodules
+    if(ET_BUILD_VULKAN)
+        message(STATUS "Including Vulkan submodules...")
+        list(APPEND _git_submodules
+            backends/vulkan/third-party/volk
+            backends/vulkan/third-party/Vulkan-Headers
+        )
+    endif()
+
+    # CoreML submodules (if needed)
+    if(ET_BUILD_COREML)
+        message(STATUS "Including CoreML submodules...")
+        # CoreML doesn't have external submodules, uses system frameworks
+    endif()
+
+    # MPS submodules (if needed)
+    if(ET_BUILD_MPS)
+        message(STATUS "Including MPS submodules...")
+        # MPS doesn't have external submodules, uses system frameworks
+    endif()
+
+    message(STATUS "Git submodules to fetch: ${_git_submodules}")
+
     FetchContent_Declare(
         executorch_fetch
         GIT_REPOSITORY https://github.com/pytorch/executorch.git
@@ -137,16 +177,7 @@ else()
         GIT_SHALLOW TRUE
         GIT_PROGRESS TRUE
         SOURCE_DIR ${executorch_SOURCE_DIR}
-        GIT_SUBMODULES
-            third-party/flatbuffers
-            third-party/flatcc
-            third-party/json
-            third-party/gflags
-            backends/xnnpack/third-party/XNNPACK
-            backends/xnnpack/third-party/cpuinfo
-            backends/xnnpack/third-party/pthreadpool
-            backends/xnnpack/third-party/FP16
-            backends/xnnpack/third-party/FXdiv
+        GIT_SUBMODULES ${_git_submodules}
     )
 
     FetchContent_MakeAvailable(executorch_fetch)

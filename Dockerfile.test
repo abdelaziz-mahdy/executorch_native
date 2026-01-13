@@ -1,0 +1,37 @@
+# Dockerfile for testing Linux builds
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    ninja-build \
+    python3 \
+    python3-pip \
+    wget \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Vulkan SDK
+RUN wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | apt-key add - && \
+    wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list && \
+    apt-get update && \
+    apt-get install -y vulkan-sdk && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+WORKDIR /workspace
+
+# Copy the native directory
+COPY . /workspace/
+
+# Make scripts executable
+RUN chmod +x scripts/*.sh
+
+# Default command - build xnnpack-vulkan variant
+CMD ["bash", "-c", "./scripts/build-linux.sh 1.0.1"]
