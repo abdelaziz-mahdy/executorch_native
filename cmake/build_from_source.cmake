@@ -182,9 +182,11 @@ else()
     message(STATUS "ExecuTorch fetched successfully to ${executorch_SOURCE_DIR}")
 endif()
 
-# CRITICAL: Force Vulkan OFF immediately before add_subdirectory
-# FetchContent_Populate's subbuild may have reset cache variables
+# CRITICAL: Force Vulkan OFF using BOTH cache AND regular variables
+# Regular variables shadow cache variables in CMake's variable lookup
+# This ensures ExecuTorch sees OFF regardless of any cache state
 set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend - DISABLED" FORCE)
+set(EXECUTORCH_BUILD_VULKAN OFF)  # Regular variable shadows cache
 
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
