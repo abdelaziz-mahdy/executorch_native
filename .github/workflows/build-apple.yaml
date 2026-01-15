@@ -2,14 +2,8 @@ name: Build Apple (macOS + iOS)
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
   workflow_dispatch:
     inputs:
       version:

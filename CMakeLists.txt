@@ -22,7 +22,7 @@ endif()
 
 # Prebuilt release version (our release tag for prebuilt downloads)
 if(NOT DEFINED EXECUTORCH_PREBUILT_VERSION OR "${EXECUTORCH_PREBUILT_VERSION}" STREQUAL "")
-    set(EXECUTORCH_PREBUILT_VERSION "1.0.1.4" CACHE STRING "Prebuilt release version" FORCE)
+    set(EXECUTORCH_PREBUILT_VERSION "1.0.1.5" CACHE STRING "Prebuilt release version" FORCE)
 else()
     set(EXECUTORCH_PREBUILT_VERSION "${EXECUTORCH_PREBUILT_VERSION}" CACHE STRING "Prebuilt release version" FORCE)
 endif()

@@ -2,14 +2,8 @@ name: Build Linux
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
   workflow_dispatch:
     inputs:
       version:
@@ -25,9 +19,9 @@ env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
 jobs:
-  build:
+  build-x64:
     runs-on: ubuntu-22.04
-    name: Linux x64 (all variants)
+    name: Linux x64
 
     steps:
       - name: Checkout
@@ -50,8 +44,33 @@ jobs:
           path: dist/*.tar.gz
           retention-days: 7
 
+  build-arm64:
+    runs-on: ubuntu-22.04-arm
+    name: Linux arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run build script
+        run: |
+          chmod +x scripts/build-linux.sh
+          ./scripts/build-linux.sh "${{ env.EXECUTORCH_VERSION }}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-all
+          path: dist/*.tar.gz
+          retention-days: 7
+
   release:
-    needs: build
+    needs: [build-x64, build-arm64]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:

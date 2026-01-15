@@ -1,21 +1,36 @@
 #!/bin/bash
-# build-linux.sh - Build all Linux x64 variants
+# build-linux.sh - Build all Linux variants (x64 or arm64)
 #
-# Builds ALL combinations of backends for Linux x64:
+# Builds ALL combinations of backends for Linux:
 # - xnnpack
-# - xnnpack-vulkan
 #
 # Usage: ./build-linux.sh [VERSION]
 # Example: ./build-linux.sh 1.0.1
+#
+# Architecture is auto-detected from host machine.
 
 set -e
 
 VERSION="${1:-1.0.1}"
-ARCH="x64"
 PLATFORM="linux"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
+
+# Auto-detect architecture
+HOST_ARCH=$(uname -m)
+case "$HOST_ARCH" in
+  x86_64)
+    ARCH="x64"
+    ;;
+  aarch64|arm64)
+    ARCH="arm64"
+    ;;
+  *)
+    echo "ERROR: Unsupported architecture: $HOST_ARCH"
+    exit 1
+    ;;
+esac
 
 # All variants to build: backends:vulkan
 # NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation

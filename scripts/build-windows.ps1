@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Build all Windows x64 variants of ExecuTorch FFI
+    Build all Windows variants of ExecuTorch FFI (x64 + ARM64)
 
 .DESCRIPTION
-    Builds ALL combinations of backends for Windows x64:
-    - xnnpack
-    - xnnpack-vulkan
+    Builds ALL combinations of backends for Windows:
+    - x64: xnnpack
+    - arm64: xnnpack
 
 .PARAMETER Version
     ExecuTorch version to build (default: 1.0.1)
@@ -25,11 +25,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Arch = "x64"
 $Platform = "windows"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
 $CacheDir = "$ProjectDir\.cache"
+
+# Architectures to build
+$Architectures = @("x64", "ARM64")
 
 # All variants to build: backends:vulkan
 # NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
@@ -43,7 +45,7 @@ Write-Host "ExecuTorch Windows Build Script"
 Write-Host "============================================================"
 Write-Host "  Version: $Version"
 Write-Host "  Platform: $Platform"
-Write-Host "  Architecture: $Arch"
+Write-Host "  Architectures: $($Architectures -join ', ')"
 Write-Host "  Variants: $($Variants.Count)"
 Write-Host "============================================================"
 
@@ -62,17 +64,20 @@ function Install-Dependencies {
 
 function Build-Variant {
     param(
+        [string]$Arch,
         [string]$Backends,
         [string]$Vulkan,
         [string]$BuildType
     )
 
     $BuildTypeLower = $BuildType.ToLower()
-    $BuildDir = "$ProjectDir\build-$Platform-$Arch-$Backends-$BuildTypeLower"
-    $ArtifactName = "libexecutorch_ffi-$Platform-$Arch-$Backends-$BuildTypeLower.zip"
+    # Use lowercase arch in artifact name for consistency
+    $ArchLower = $Arch.ToLower()
+    $BuildDir = "$ProjectDir\build-$Platform-$ArchLower-$Backends-$BuildTypeLower"
+    $ArtifactName = "libexecutorch_ffi-$Platform-$ArchLower-$Backends-$BuildTypeLower.zip"
 
     Write-Host ""
-    Write-Host "=== Building $Platform-$Arch-$Backends-$BuildTypeLower ==="
+    Write-Host "=== Building $Platform-$ArchLower-$Backends-$BuildTypeLower ==="
     Write-Host "  Build directory: $BuildDir"
 
     # Configure
@@ -116,10 +121,17 @@ Install-Dependencies
 # Create dist directory
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 
-# Build all variants
-foreach ($Variant in $Variants) {
-    Build-Variant -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Release"
-    Build-Variant -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Debug"
+# Build all architecture and variant combinations
+foreach ($Arch in $Architectures) {
+    Write-Host ""
+    Write-Host "============================================================"
+    Write-Host "Building $Arch variants"
+    Write-Host "============================================================"
+
+    foreach ($Variant in $Variants) {
+        Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Release"
+        Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Debug"
+    }
 }
 
 Write-Host ""
