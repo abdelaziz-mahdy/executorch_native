@@ -171,15 +171,19 @@ else()
         GIT_SUBMODULES ${_git_submodules}
     )
 
-    FetchContent_MakeAvailable(executorch_fetch)
-    message(STATUS "ExecuTorch fetched successfully")
+    # Use FetchContent_Populate instead of MakeAvailable for more control
+    # MakeAvailable automatically calls add_subdirectory which can cause timing issues
+    FetchContent_Populate(executorch_fetch)
+    message(STATUS "ExecuTorch fetched successfully to ${executorch_SOURCE_DIR}")
 endif()
 
-# Add ExecuTorch as subdirectory
-if(NOT TARGET executorch)
-    message(STATUS "Adding ExecuTorch as subdirectory...")
-    add_subdirectory(${executorch_SOURCE_DIR} ${executorch_BINARY_DIR})
-endif()
+# Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
+message(STATUS "Adding ExecuTorch as subdirectory...")
+message(STATUS "  EXECUTORCH_BUILD_VULKAN: ${EXECUTORCH_BUILD_VULKAN}")
+message(STATUS "  EXECUTORCH_BUILD_XNNPACK: ${EXECUTORCH_BUILD_XNNPACK}")
+message(STATUS "  EXECUTORCH_BUILD_COREML: ${EXECUTORCH_BUILD_COREML}")
+message(STATUS "  EXECUTORCH_BUILD_MPS: ${EXECUTORCH_BUILD_MPS}")
+add_subdirectory(${executorch_SOURCE_DIR} ${executorch_BINARY_DIR})
 
 # ============================================================================
 # Set Include and Library Paths
