@@ -65,7 +65,13 @@ set(EXECUTORCH_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
 set(EXECUTORCH_BUILD_EXAMPLES OFF CACHE BOOL "Build examples" FORCE)
 set(EXECUTORCH_BUILD_PYBIND OFF CACHE BOOL "Build pybind" FORCE)
 
-# Backend options
+# Backend options - debug output
+message(STATUS "ET_BUILD_XNNPACK input: ${ET_BUILD_XNNPACK}")
+message(STATUS "ET_BUILD_COREML input: ${ET_BUILD_COREML}")
+message(STATUS "ET_BUILD_MPS input: ${ET_BUILD_MPS}")
+message(STATUS "ET_BUILD_VULKAN input: ${ET_BUILD_VULKAN}")
+message(STATUS "ET_BUILD_QNN input: ${ET_BUILD_QNN}")
+
 if(ET_BUILD_XNNPACK)
     set(EXECUTORCH_BUILD_XNNPACK ON CACHE BOOL "Build XNNPACK backend" FORCE)
 else()
@@ -84,11 +90,10 @@ else()
     set(EXECUTORCH_BUILD_MPS OFF CACHE BOOL "Build MPS backend" FORCE)
 endif()
 
-if(ET_BUILD_VULKAN)
-    set(EXECUTORCH_BUILD_VULKAN ON CACHE BOOL "Build Vulkan backend" FORCE)
-else()
-    set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
-endif()
+# VULKAN is ALWAYS OFF - requires glslc compiler and complex shader setup
+# Ignore ET_BUILD_VULKAN input and always disable
+set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
+message(STATUS "Vulkan build DISABLED (requires glslc shader compiler)")
 
 if(ET_BUILD_QNN)
     set(EXECUTORCH_BUILD_QNN ON CACHE BOOL "Build QNN backend" FORCE)
@@ -176,6 +181,10 @@ else()
     FetchContent_Populate(executorch_fetch)
     message(STATUS "ExecuTorch fetched successfully to ${executorch_SOURCE_DIR}")
 endif()
+
+# CRITICAL: Force Vulkan OFF immediately before add_subdirectory
+# FetchContent_Populate's subbuild may have reset cache variables
+set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend - DISABLED" FORCE)
 
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
