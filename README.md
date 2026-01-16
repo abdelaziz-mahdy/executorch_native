@@ -9,7 +9,7 @@ This project uses a 4-part version scheme: `X.Y.Z.W`
 - **X.Y.Z** - ExecuTorch version (e.g., `1.0.1`)
 - **W** - Build iteration for this ExecuTorch version (e.g., `1`, `2`, `3`)
 
-Example: `v1.0.1.5` means ExecuTorch 1.0.1, fifth build iteration.
+Example: `v1.0.1.6` means ExecuTorch 1.0.1, sixth build iteration.
 
 When ExecuTorch releases a new version, the first three numbers update and W resets to 1.
 
@@ -36,7 +36,7 @@ libexecutorch_ffi-{platform}-{arch}-{backends}-{build_type}.{ext}
 | `build_type` | `release`, `debug` |
 | `ext` | `.tar.gz` (Unix), `.zip` (Windows) |
 
-### Current Release Variants (v1.0.1.5)
+### Current Release Variants (v1.0.1.6)
 
 #### macOS
 | Artifact | Description |
@@ -72,7 +72,6 @@ libexecutorch_ffi-{platform}-{arch}-{backends}-{build_type}.{ext}
 | Artifact | Description |
 |----------|-------------|
 | `libexecutorch_ffi-windows-x64-xnnpack-{release,debug}.zip` | x64, XNNPACK only |
-| `libexecutorch_ffi-windows-arm64-xnnpack-{release,debug}.zip` | ARM64, XNNPACK only |
 
 #### Android
 | Artifact | Description |
@@ -96,7 +95,7 @@ The build system automatically:
 | iOS Device | arm64 | XNNPACK, CoreML |
 | iOS Simulator | arm64, x86_64 | XNNPACK, CoreML |
 | Linux | x64, arm64 | XNNPACK |
-| Windows | x64, arm64 | XNNPACK |
+| Windows | x64 | XNNPACK |
 | Android | arm64-v8a, x86_64 | XNNPACK |
 
 **Note**: Vulkan and QNN backends are not currently enabled in prebuilt releases.
@@ -122,7 +121,7 @@ cmake --build . --parallel
 | Option | Default | Description |
 |--------|---------|-------------|
 | `EXECUTORCH_VERSION` | 1.0.1 | ExecuTorch source version (for source builds) |
-| `EXECUTORCH_PREBUILT_VERSION` | 1.0.1.5 | Prebuilt release version (for prebuilt downloads) |
+| `EXECUTORCH_PREBUILT_VERSION` | 1.0.1.6 | Prebuilt release version (for prebuilt downloads) |
 | `EXECUTORCH_BUILD_MODE` | prebuilt | `prebuilt` or `source` |
 | `ET_BUILD_XNNPACK` | ON | Enable XNNPACK backend |
 | `ET_BUILD_COREML` | OFF (ON for Apple) | Enable CoreML backend |

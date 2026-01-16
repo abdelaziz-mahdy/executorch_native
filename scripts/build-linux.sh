@@ -60,12 +60,7 @@ install_dependencies() {
   # Install Python dependencies
   pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-  # Install Vulkan SDK
-  echo "Installing Vulkan SDK..."
-  wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-  sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
-  sudo apt-get update
-  sudo apt-get install -y vulkan-sdk
+  # NOTE: Vulkan SDK not installed - not available for arm64 and Vulkan builds are disabled anyway
 
   echo "Dependencies installed successfully"
 }

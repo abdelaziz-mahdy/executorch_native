@@ -31,7 +31,9 @@ $ProjectDir = Split-Path -Parent $ScriptDir
 $CacheDir = "$ProjectDir\.cache"
 
 # Architectures to build
-$Architectures = @("x64", "ARM64")
+# NOTE: ARM64 cross-compilation not supported - ExecuTorch build tools (flatc) need to run on host
+# Would require ARM64 Windows runner which GitHub doesn't provide
+$Architectures = @("x64")
 
 # All variants to build: backends:vulkan
 # NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
