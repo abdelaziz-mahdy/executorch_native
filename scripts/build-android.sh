@@ -1,9 +1,11 @@
 #!/bin/bash
-# build-android.sh - Build all Android variants (arm64-v8a + x86_64)
+# build-android.sh - Build all Android variants
 #
 # Builds ALL combinations of backends for Android:
-# - arm64-v8a: xnnpack
-# - x86_64: xnnpack (for emulator)
+# - arm64-v8a: xnnpack (64-bit ARM devices)
+# - armeabi-v7a: xnnpack (32-bit ARM devices)
+# - x86_64: xnnpack (64-bit emulator)
+# - x86: xnnpack (32-bit emulator)
 #
 # Usage: ./build-android.sh [VERSION]
 # Example: ./build-android.sh 1.0.1
@@ -18,10 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
-# Android ABIs to build
+# Android ABIs to build (all supported architectures)
 ABIS=(
   "arm64-v8a"
+  "armeabi-v7a"
   "x86_64"
+  "x86"
 )
 
 # Backends (currently only xnnpack for Android)
