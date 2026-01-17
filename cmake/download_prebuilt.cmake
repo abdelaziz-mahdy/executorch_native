@@ -222,6 +222,27 @@ if(NOT EXISTS "${EXECUTORCH_INSTALL_DIR}/include")
         "Pre-built package missing include/ directory: ${EXECUTORCH_INSTALL_DIR}")
 endif()
 
+# Platform-specific library verification
+if(WIN32)
+    if(NOT EXISTS "${EXECUTORCH_INSTALL_DIR}/lib/executorch_ffi.dll")
+        message(FATAL_ERROR
+            "Pre-built package missing DLL: ${EXECUTORCH_INSTALL_DIR}/lib/executorch_ffi.dll")
+    endif()
+    message(STATUS "Found Windows DLL: ${EXECUTORCH_INSTALL_DIR}/lib/executorch_ffi.dll")
+elseif(APPLE)
+    file(GLOB _dylibs "${EXECUTORCH_INSTALL_DIR}/lib/*.dylib")
+    if(NOT _dylibs)
+        message(FATAL_ERROR
+            "Pre-built package missing dylib files in: ${EXECUTORCH_INSTALL_DIR}/lib/")
+    endif()
+else()
+    file(GLOB _sos "${EXECUTORCH_INSTALL_DIR}/lib/*.so*")
+    if(NOT _sos)
+        message(FATAL_ERROR
+            "Pre-built package missing .so files in: ${EXECUTORCH_INSTALL_DIR}/lib/")
+    endif()
+endif()
+
 # List what we found
 file(GLOB _prebuilt_libs "${EXECUTORCH_INSTALL_DIR}/lib/*")
 message(STATUS "Found pre-built libraries:")

@@ -261,10 +261,12 @@ endif()
 # Install Rules
 # ============================================================================
 
+# Install rules - put everything in lib/ for consistency across platforms
+# (Windows DLLs typically go to bin/, but we use lib/ for native assets uniformity)
 install(TARGETS ${PROJECT_NAME}
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
+    RUNTIME DESTINATION lib
 )
 
 install(FILES ${HEADERS} DESTINATION include)
