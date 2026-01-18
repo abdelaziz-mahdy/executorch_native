@@ -180,8 +180,35 @@ set(_vulkan_submodules
 if(EXISTS "${executorch_SOURCE_DIR}/CMakeLists.txt")
     message(STATUS "ExecuTorch v${EXECUTORCH_VERSION} already present at ${executorch_SOURCE_DIR}")
 
-    # If Vulkan is requested but submodules are missing, fetch them separately
+    # If Vulkan is requested, verify required files are present
     if(EXECUTORCH_BUILD_VULKAN)
+        # Check for Vulkan GLSL shaders (required for shader compilation)
+        set(_vulkan_glsl_dir "${executorch_SOURCE_DIR}/backends/vulkan/runtime/graph/ops/glsl")
+        file(GLOB _vulkan_glsl_files "${_vulkan_glsl_dir}/*.glsl")
+        list(LENGTH _vulkan_glsl_files _glsl_count)
+
+        if(_glsl_count EQUAL 0)
+            message(STATUS "Vulkan GLSL shaders missing (found ${_glsl_count} files), restoring...")
+            # Use git checkout to restore any missing files in the vulkan backend
+            execute_process(
+                COMMAND git checkout HEAD -- backends/vulkan/
+                WORKING_DIRECTORY ${executorch_SOURCE_DIR}
+                RESULT_VARIABLE _git_result
+            )
+            if(NOT _git_result EQUAL 0)
+                message(WARNING "Failed to restore Vulkan backend files. Disabling Vulkan backend.")
+                set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
+            else()
+                # Verify files are now present
+                file(GLOB _vulkan_glsl_files "${_vulkan_glsl_dir}/*.glsl")
+                list(LENGTH _vulkan_glsl_files _glsl_count)
+                message(STATUS "Vulkan GLSL shaders restored (found ${_glsl_count} files)")
+            endif()
+        else()
+            message(STATUS "Vulkan GLSL shaders present (found ${_glsl_count} files)")
+        endif()
+
+        # Check for Vulkan submodules
         set(_vulkan_submodules_missing FALSE)
         foreach(_submod ${_vulkan_submodules})
             if(NOT EXISTS "${executorch_SOURCE_DIR}/${_submod}/CMakeLists.txt"
@@ -243,6 +270,32 @@ endif()
 
 # Note: EXECUTORCH_BUILD_VULKAN was already set earlier based on glslc availability
 # No need to force it OFF here - we respect the computed value
+
+# Diagnostic: Check for Vulkan GLSL files before adding subdirectory
+set(_vulkan_glsl_dir "${executorch_SOURCE_DIR}/backends/vulkan/runtime/graph/ops/glsl")
+message(STATUS "Checking Vulkan GLSL directory: ${_vulkan_glsl_dir}")
+if(EXISTS "${_vulkan_glsl_dir}")
+    file(GLOB _all_glsl_files "${_vulkan_glsl_dir}/*.glsl")
+    list(LENGTH _all_glsl_files _total_glsl_count)
+    message(STATUS "  Directory exists, found ${_total_glsl_count} .glsl files")
+    if(_total_glsl_count GREATER 0)
+        list(GET _all_glsl_files 0 _first_file)
+        message(STATUS "  First file: ${_first_file}")
+    endif()
+else()
+    message(STATUS "  Directory does NOT exist!")
+    # List the parent directory to see what's there
+    set(_vulkan_ops_dir "${executorch_SOURCE_DIR}/backends/vulkan/runtime/graph/ops")
+    if(EXISTS "${_vulkan_ops_dir}")
+        file(GLOB _ops_contents "${_vulkan_ops_dir}/*")
+        message(STATUS "  Contents of ${_vulkan_ops_dir}:")
+        foreach(_item ${_ops_contents})
+            message(STATUS "    ${_item}")
+        endforeach()
+    else()
+        message(STATUS "  Parent directory ${_vulkan_ops_dir} also does NOT exist!")
+    endif()
+endif()
 
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
