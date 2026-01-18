@@ -33,6 +33,32 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $VulkanInstallerUrl = "https://sdk.lunarg.com/sdk/download/${{ env.VULKAN_SDK_VERSION }}/windows/VulkanSDK-${{ env.VULKAN_SDK_VERSION }}-Installer.exe"
+          $VulkanInstallerPath = "$env:TEMP\VulkanSDK-Installer.exe"
+          $VulkanInstallDir = "C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}"
+
+          Write-Host "Downloading Vulkan SDK ${{ env.VULKAN_SDK_VERSION }}..."
+          Invoke-WebRequest -Uri $VulkanInstallerUrl -OutFile $VulkanInstallerPath -UseBasicParsing
+
+          Write-Host "Installing Vulkan SDK..."
+          Start-Process -FilePath $VulkanInstallerPath -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait -NoNewWindow
+
+          # Set environment variables for subsequent steps
+          echo "VULKAN_SDK=$VulkanInstallDir" >> $env:GITHUB_ENV
+          echo "$VulkanInstallDir\Bin" >> $env:GITHUB_PATH
+
+          # Verify installation
+          if (Test-Path "$VulkanInstallDir\Bin\glslc.exe") {
+              Write-Host "Vulkan SDK installed successfully at $VulkanInstallDir"
+              & "$VulkanInstallDir\Bin\glslc.exe" --version
+          } else {
+              Write-Error "Vulkan SDK installation failed - glslc not found"
+              exit 1
+          }
+
       - name: Run build script
         shell: pwsh
         run: |

@@ -90,10 +90,26 @@ else()
     set(EXECUTORCH_BUILD_MPS OFF CACHE BOOL "Build MPS backend" FORCE)
 endif()
 
-# VULKAN is ALWAYS OFF - requires glslc compiler and complex shader setup
-# Ignore ET_BUILD_VULKAN input and always disable
-set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
-message(STATUS "Vulkan build DISABLED (requires glslc shader compiler)")
+# Vulkan requires glslc compiler - check availability when requested
+if(ET_BUILD_VULKAN)
+    find_program(GLSLC_EXECUTABLE glslc
+        HINTS
+            $ENV{VULKAN_SDK}/bin
+            /usr/bin
+            /usr/local/bin
+    )
+    if(NOT GLSLC_EXECUTABLE)
+        message(WARNING "glslc not found - Vulkan backend requires glslc compiler")
+        message(WARNING "Install Vulkan SDK or set VULKAN_SDK environment variable")
+        message(WARNING "Disabling Vulkan backend")
+        set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
+    else()
+        message(STATUS "Found glslc: ${GLSLC_EXECUTABLE}")
+        set(EXECUTORCH_BUILD_VULKAN ON CACHE BOOL "Build Vulkan backend" FORCE)
+    endif()
+else()
+    set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
+endif()
 
 if(ET_BUILD_QNN)
     set(EXECUTORCH_BUILD_QNN ON CACHE BOOL "Build QNN backend" FORCE)
@@ -138,31 +154,70 @@ message(STATUS "Using Python wrapper: ${PYTHON_EXECUTABLE}")
 # Fetch ExecuTorch Source
 # ============================================================================
 
+# Define all possible submodules
+set(_core_submodules
+    # Core dependencies
+    third-party/flatbuffers
+    third-party/flatcc
+    third-party/json
+    third-party/gflags
+    # XNNPACK backend (always needed as base)
+    backends/xnnpack/third-party/XNNPACK
+    backends/xnnpack/third-party/cpuinfo
+    backends/xnnpack/third-party/pthreadpool
+    backends/xnnpack/third-party/FP16
+    backends/xnnpack/third-party/FXdiv
+    # Note: CoreML and MPS use system frameworks, no external submodules
+)
+
+set(_vulkan_submodules
+    backends/vulkan/runtime/vk_api/volk
+    backends/vulkan/runtime/vk_api/Vulkan-Headers
+)
+
 if(EXISTS "${executorch_SOURCE_DIR}/CMakeLists.txt")
     message(STATUS "ExecuTorch v${EXECUTORCH_VERSION} already present at ${executorch_SOURCE_DIR}")
+
+    # If Vulkan is requested but submodules are missing, fetch them separately
+    if(ET_BUILD_VULKAN AND GLSLC_EXECUTABLE)
+        set(_vulkan_submodules_missing FALSE)
+        foreach(_submod ${_vulkan_submodules})
+            if(NOT EXISTS "${executorch_SOURCE_DIR}/${_submod}/CMakeLists.txt")
+                set(_vulkan_submodules_missing TRUE)
+                break()
+            endif()
+        endforeach()
+
+        if(_vulkan_submodules_missing)
+            message(STATUS "Vulkan submodules missing, fetching them...")
+            execute_process(
+                COMMAND git submodule update --init --recursive
+                    backends/vulkan/runtime/vk_api/volk
+                    backends/vulkan/runtime/vk_api/Vulkan-Headers
+                WORKING_DIRECTORY ${executorch_SOURCE_DIR}
+                RESULT_VARIABLE _git_result
+            )
+            if(NOT _git_result EQUAL 0)
+                message(WARNING "Failed to fetch Vulkan submodules. Disabling Vulkan backend.")
+                set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
+            else()
+                message(STATUS "Vulkan submodules fetched successfully")
+            endif()
+        endif()
+    endif()
 else()
     message(STATUS "Fetching ExecuTorch v${EXECUTORCH_VERSION}...")
 
     set(FETCHCONTENT_QUIET FALSE)
 
-    # Fetch submodules needed for build
-    # Note: Vulkan submodules are not included - Vulkan builds are disabled
-    # because they require glslc compiler and complex shader compilation setup
-    set(_git_submodules
-        # Core dependencies
-        third-party/flatbuffers
-        third-party/flatcc
-        third-party/json
-        third-party/gflags
-        # XNNPACK backend (always needed as base)
-        backends/xnnpack/third-party/XNNPACK
-        backends/xnnpack/third-party/cpuinfo
-        backends/xnnpack/third-party/pthreadpool
-        backends/xnnpack/third-party/FP16
-        backends/xnnpack/third-party/FXdiv
-        # Note: CoreML and MPS use system frameworks, no external submodules
-        # Vulkan submodules (volk, Vulkan-Headers) not included - Vulkan builds disabled
-    )
+    # Start with core submodules
+    set(_git_submodules ${_core_submodules})
+
+    # Add Vulkan submodules if Vulkan backend is enabled
+    if(ET_BUILD_VULKAN AND GLSLC_EXECUTABLE)
+        message(STATUS "Including Vulkan submodules for initial fetch")
+        list(APPEND _git_submodules ${_vulkan_submodules})
+    endif()
 
     message(STATUS "Git submodules to fetch: ${_git_submodules}")
 
@@ -182,11 +237,8 @@ else()
     message(STATUS "ExecuTorch fetched successfully to ${executorch_SOURCE_DIR}")
 endif()
 
-# CRITICAL: Force Vulkan OFF using BOTH cache AND regular variables
-# Regular variables shadow cache variables in CMake's variable lookup
-# This ensures ExecuTorch sees OFF regardless of any cache state
-set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend - DISABLED" FORCE)
-set(EXECUTORCH_BUILD_VULKAN OFF)  # Regular variable shadows cache
+# Note: EXECUTORCH_BUILD_VULKAN was already set earlier based on glslc availability
+# No need to force it OFF here - we respect the computed value
 
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")

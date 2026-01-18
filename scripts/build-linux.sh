@@ -3,11 +3,13 @@
 #
 # Builds ALL combinations of backends for Linux:
 # - xnnpack
+# - xnnpack-vulkan (requires Vulkan SDK with glslc)
 #
 # Usage: ./build-linux.sh [VERSION]
 # Example: ./build-linux.sh 1.0.1
 #
 # Architecture is auto-detected from host machine.
+# Vulkan builds require Vulkan SDK (glslc compiler).
 
 set -e
 
@@ -32,12 +34,22 @@ case "$HOST_ARCH" in
     ;;
 esac
 
+# Check for Vulkan SDK / glslc availability
+check_vulkan() {
+    if command -v glslc &> /dev/null; then
+        return 0
+    elif [ -n "$VULKAN_SDK" ] && [ -x "$VULKAN_SDK/bin/glslc" ]; then
+        export PATH="$VULKAN_SDK/bin:$PATH"
+        return 0
+    fi
+    return 1
+}
+
 # All variants to build: backends:vulkan
-# NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
-# ExecuTorch's Vulkan build needs special setup (see their .ci/scripts/setup-vulkan-linux-deps.sh)
+# Define all variants - if Vulkan variant is listed and SDK is missing, build will fail
 VARIANTS=(
   "xnnpack:OFF"
-  # "xnnpack-vulkan:ON"  # TODO: Enable once Vulkan build is properly configured
+  "xnnpack-vulkan:ON"
 )
 
 echo "============================================================"
@@ -60,8 +72,6 @@ install_dependencies() {
   # Install Python dependencies
   pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-  # NOTE: Vulkan SDK not installed - not available for arm64 and Vulkan builds are disabled anyway
-
   echo "Dependencies installed successfully"
 }
 
@@ -77,6 +87,16 @@ build_variant() {
   echo ""
   echo "=== Building ${PLATFORM}-${ARCH}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
+
+  # Check Vulkan requirement
+  if [ "$vulkan" = "ON" ]; then
+    if ! check_vulkan; then
+      echo "ERROR: Vulkan variant requested but glslc not found"
+      echo "Please install the Vulkan SDK (https://vulkan.lunarg.com/sdk/home)"
+      exit 1
+    fi
+    echo "  Vulkan: enabled (glslc found)"
+  fi
 
   # Configure
   cmake -B "$build_dir" -S "$PROJECT_DIR" -G Ninja \

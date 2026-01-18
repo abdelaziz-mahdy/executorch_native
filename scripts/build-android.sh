@@ -2,10 +2,12 @@
 # build-android.sh - Build all Android variants
 #
 # Builds ALL combinations of backends for Android:
-# - arm64-v8a: xnnpack (64-bit ARM devices)
-# - armeabi-v7a: xnnpack (32-bit ARM devices)
-# - x86_64: xnnpack (64-bit emulator)
-# - x86: xnnpack (32-bit emulator)
+# - arm64-v8a: xnnpack, xnnpack-vulkan (64-bit ARM devices)
+# - armeabi-v7a: xnnpack, xnnpack-vulkan (32-bit ARM devices)
+# - x86_64: xnnpack, xnnpack-vulkan (64-bit emulator)
+# - x86: xnnpack, xnnpack-vulkan (32-bit emulator)
+#
+# Vulkan builds require glslc compiler (from Android NDK or Vulkan SDK)
 #
 # Usage: ./build-android.sh [VERSION]
 # Example: ./build-android.sh 1.0.1
@@ -28,8 +30,37 @@ ABIS=(
   "x86"
 )
 
-# Backends (currently only xnnpack for Android)
-BACKENDS="xnnpack"
+# Check for glslc availability (needed for Vulkan shader compilation)
+# Android NDK r21+ includes glslc in the shader-tools directory
+check_vulkan() {
+    if command -v glslc &> /dev/null; then
+        return 0
+    elif [ -n "$ANDROID_NDK_HOME" ]; then
+        # Try to find glslc in NDK (different locations depending on NDK version)
+        for glslc_path in \
+            "$ANDROID_NDK_HOME/shader-tools/$(uname -s | tr '[:upper:]' '[:lower:]')-x86_64/glslc" \
+            "$ANDROID_NDK_HOME/shader-tools/linux-x86_64/glslc" \
+            "$ANDROID_NDK_HOME/shader-tools/darwin-x86_64/glslc" \
+            "$ANDROID_NDK_HOME/shader-tools/windows-x86_64/glslc.exe"; do
+            if [ -x "$glslc_path" ]; then
+                export PATH="$(dirname "$glslc_path"):$PATH"
+                return 0
+            fi
+        done
+    fi
+    if [ -n "$VULKAN_SDK" ] && [ -x "$VULKAN_SDK/bin/glslc" ]; then
+        export PATH="$VULKAN_SDK/bin:$PATH"
+        return 0
+    fi
+    return 1
+}
+
+# All variants to build: backends:vulkan
+# Define all variants - if Vulkan variant is listed and SDK is missing, build will fail
+VARIANTS=(
+    "xnnpack:OFF"
+    "xnnpack-vulkan:ON"
+)
 
 echo "============================================================"
 echo "ExecuTorch Android Build Script"
@@ -37,7 +68,7 @@ echo "============================================================"
 echo "  Version: ${VERSION}"
 echo "  Platform: ${PLATFORM}"
 echo "  ABIs: ${ABIS[*]}"
-echo "  Backends: ${BACKENDS}"
+echo "  Variants: ${#VARIANTS[@]}"
 echo "  NDK: ${ANDROID_NDK_HOME:-NOT SET}"
 echo "============================================================"
 
@@ -70,14 +101,27 @@ install_dependencies() {
 # Build a single variant
 build_variant() {
   local abi=$1
-  local build_type=$2
+  local backends=$2
+  local vulkan=$3
+  local build_type=$4
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
-  local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${abi}-${BACKENDS}-${build_type_lower}"
-  local artifact_name="libexecutorch_ffi-${PLATFORM}-${abi}-${BACKENDS}-${build_type_lower}.tar.gz"
+  local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${abi}-${backends}-${build_type_lower}"
+  local artifact_name="libexecutorch_ffi-${PLATFORM}-${abi}-${backends}-${build_type_lower}.tar.gz"
 
   echo ""
-  echo "=== Building ${PLATFORM}-${abi}-${BACKENDS}-${build_type_lower} ==="
+  echo "=== Building ${PLATFORM}-${abi}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
+  echo "  Backends: XNNPACK=ON, Vulkan=${vulkan}"
+
+  # Check Vulkan requirement
+  if [ "$vulkan" = "ON" ]; then
+    if ! check_vulkan; then
+      echo "ERROR: Vulkan variant requested but glslc not found"
+      echo "Please install the Vulkan SDK or use Android NDK r21+ which includes glslc"
+      exit 1
+    fi
+    echo "  Vulkan: enabled (glslc found)"
+  fi
 
   # Configure
   cmake -B "$build_dir" -S "$PROJECT_DIR" -G Ninja \
@@ -92,7 +136,7 @@ build_variant() {
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \
-    -DET_BUILD_VULKAN=OFF \
+    -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
@@ -120,14 +164,18 @@ install_dependencies
 # Create dist directory
 mkdir -p dist
 
-# Build all ABI variants
+# Build all ABI and variant combinations
 for abi in "${ABIS[@]}"; do
   echo ""
   echo "============================================================"
   echo "Building ${abi} variants"
   echo "============================================================"
-  build_variant "$abi" "Release"
-  build_variant "$abi" "Debug"
+
+  for variant in "${VARIANTS[@]}"; do
+    IFS=':' read -r backends vulkan <<< "$variant"
+    build_variant "$abi" "$backends" "$vulkan" "Release"
+    build_variant "$abi" "$backends" "$vulkan" "Debug"
+  done
 done
 
 echo ""

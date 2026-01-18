@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Builds ALL combinations of backends for Windows:
-    - x64: xnnpack
-    - arm64: xnnpack
+    - x64: xnnpack, xnnpack-vulkan (if Vulkan SDK available)
+    - arm64: xnnpack (not currently built - requires ARM64 runner)
 
 .PARAMETER Version
     ExecuTorch version to build (default: 1.0.1)
@@ -35,11 +35,22 @@ $CacheDir = "$ProjectDir\.cache"
 # Would require ARM64 Windows runner which GitHub doesn't provide
 $Architectures = @("x64")
 
-# All variants to build: backends:vulkan
-# NOTE: Vulkan is disabled for now - requires glslc compiler and complex shader compilation
+# Check for Vulkan SDK / glslc availability
+function Test-VulkanAvailable {
+    $GlslcPath = Get-Command "glslc" -ErrorAction SilentlyContinue
+    if ($GlslcPath) {
+        return $true
+    } elseif ($env:VULKAN_SDK -and (Test-Path "$env:VULKAN_SDK\Bin\glslc.exe")) {
+        $env:PATH = "$env:VULKAN_SDK\Bin;$env:PATH"
+        return $true
+    }
+    return $false
+}
+
+# All variants to build - if Vulkan variant is listed and SDK is missing, build will fail
 $Variants = @(
     @{ Backends = "xnnpack"; Vulkan = "OFF" }
-    # @{ Backends = "xnnpack-vulkan"; Vulkan = "ON" }  # TODO: Enable once Vulkan build is properly configured
+    @{ Backends = "xnnpack-vulkan"; Vulkan = "ON" }
 )
 
 Write-Host "============================================================"
@@ -57,9 +68,6 @@ function Install-Dependencies {
 
     # Install Python dependencies
     pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
-
-    # NOTE: Vulkan SDK installation is disabled since Vulkan builds are not enabled
-    # To enable Vulkan builds, uncomment the xnnpack-vulkan variant and install the SDK
 
     Write-Host "Dependencies installed successfully"
 }
@@ -81,6 +89,16 @@ function Build-Variant {
     Write-Host ""
     Write-Host "=== Building $Platform-$ArchLower-$Backends-$BuildTypeLower ==="
     Write-Host "  Build directory: $BuildDir"
+
+    # Check Vulkan requirement
+    if ($Vulkan -eq "ON") {
+        if (-not (Test-VulkanAvailable)) {
+            Write-Error "ERROR: Vulkan variant requested but glslc not found"
+            Write-Error "Please install the Vulkan SDK (https://vulkan.lunarg.com/sdk/home)"
+            exit 1
+        }
+        Write-Host "  Vulkan: enabled (glslc found)"
+    }
 
     # Configure
     cmake -B $BuildDir -S $ProjectDir `

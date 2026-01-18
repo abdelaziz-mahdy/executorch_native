@@ -32,6 +32,13 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Vulkan SDK (MoltenVK + shaderc)
+        run: |
+          brew install shaderc molten-vk
+          # Verify glslc is available
+          which glslc
+          glslc --version
+
       - name: Run build script
         run: |
           chmod +x scripts/build-macos.sh
@@ -56,6 +63,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install Vulkan SDK (MoltenVK + shaderc)
+        run: |
+          brew install shaderc molten-vk
+          # Verify glslc is available
+          which glslc
+          glslc --version
 
       - name: Run build script
         run: |

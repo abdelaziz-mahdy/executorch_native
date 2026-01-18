@@ -2,8 +2,10 @@
 # build-macos.sh - Build all macOS variants (arm64 + x86_64)
 #
 # Builds ALL combinations of backends for macOS:
-# - arm64: 8 combinations (2^3 = coreml × mps × vulkan)
-# - x86_64: 4 combinations (2^2 = coreml × vulkan, no MPS)
+# - arm64: coreml × mps combinations, plus Vulkan variants if MoltenVK available
+# - x86_64: coreml combinations, plus Vulkan variants if MoltenVK available
+#
+# Vulkan on macOS uses MoltenVK (Vulkan-to-Metal translation layer)
 #
 # Usage: ./build-macos.sh [VERSION]
 # Example: ./build-macos.sh 1.0.1
@@ -16,28 +18,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
-# arm64: combinations of coreml/mps (Vulkan disabled - requires glslc compiler setup)
+# Check for Vulkan SDK / glslc availability (via MoltenVK on macOS)
+check_vulkan() {
+    if command -v glslc &> /dev/null; then
+        return 0
+    elif [ -n "$VULKAN_SDK" ] && [ -x "$VULKAN_SDK/bin/glslc" ]; then
+        export PATH="$VULKAN_SDK/bin:$PATH"
+        return 0
+    fi
+    return 1
+}
+
+# arm64: combinations of coreml/mps/vulkan
 # Format: backends:coreml:mps:vulkan
 ARM64_VARIANTS=(
   "xnnpack:OFF:OFF:OFF"
   "xnnpack-coreml:ON:OFF:OFF"
   "xnnpack-mps:OFF:ON:OFF"
   "xnnpack-coreml-mps:ON:ON:OFF"
-  # Vulkan variants disabled - TODO: Enable once Vulkan build is properly configured
-  # "xnnpack-vulkan:OFF:OFF:ON"
-  # "xnnpack-coreml-vulkan:ON:OFF:ON"
-  # "xnnpack-mps-vulkan:OFF:ON:ON"
-  # "xnnpack-coreml-mps-vulkan:ON:ON:ON"
+  "xnnpack-vulkan:OFF:OFF:ON"
+  "xnnpack-coreml-vulkan:ON:OFF:ON"
+  "xnnpack-mps-vulkan:OFF:ON:ON"
+  "xnnpack-coreml-mps-vulkan:ON:ON:ON"
 )
 
-# x86_64: coreml only (no MPS on Intel, Vulkan disabled)
+# x86_64: coreml only (no MPS on Intel)
 # Format: backends:coreml:vulkan
 X64_VARIANTS=(
   "xnnpack:OFF:OFF"
   "xnnpack-coreml:ON:OFF"
-  # Vulkan variants disabled - TODO: Enable once Vulkan build is properly configured
-  # "xnnpack-vulkan:OFF:ON"
-  # "xnnpack-coreml-vulkan:ON:ON"
+  "xnnpack-vulkan:OFF:ON"
+  "xnnpack-coreml-vulkan:ON:ON"
 )
 
 echo "============================================================"
@@ -58,10 +69,6 @@ install_dependencies() {
   # Install Python dependencies
   pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
-  # Install Vulkan support via MoltenVK
-  echo "Installing MoltenVK for Vulkan support..."
-  brew install molten-vk || true
-
   echo "Dependencies installed successfully"
 }
 
@@ -81,6 +88,16 @@ build_variant() {
   echo "=== Building ${PLATFORM}-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
   echo "  Backends: XNNPACK=ON, CoreML=${coreml}, MPS=${mps}, Vulkan=${vulkan}"
+
+  # Check Vulkan requirement
+  if [ "$vulkan" = "ON" ]; then
+    if ! check_vulkan; then
+      echo "ERROR: Vulkan variant requested but glslc not found"
+      echo "Please install: brew install shaderc molten-vk"
+      exit 1
+    fi
+    echo "  Vulkan: enabled (glslc found)"
+  fi
 
   # Configure
   cmake -B "$build_dir" -S "$PROJECT_DIR" \
