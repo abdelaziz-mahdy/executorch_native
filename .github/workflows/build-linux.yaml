@@ -17,7 +17,7 @@ concurrency:
 
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
-  VULKAN_SDK_VERSION: '1.3.290.0'
+  VULKAN_SDK_VERSION: '1.3.290'
 
 jobs:
   build-x64:
@@ -77,11 +77,24 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Vulkan tools (shaderc for glslc)
+      - name: Install Vulkan tools (build shaderc for glslc)
         run: |
-          # LunarG Vulkan SDK is only available for x64, use shaderc for ARM64
+          # LunarG Vulkan SDK is only available for x64
+          # Build shaderc from source for ARM64 to get glslc
           sudo apt-get update
-          sudo apt-get install -y glslc || sudo apt-get install -y shaderc
+          sudo apt-get install -y cmake ninja-build python3 git
+
+          # Clone and build shaderc
+          git clone https://github.com/google/shaderc.git /tmp/shaderc
+          cd /tmp/shaderc
+          ./utils/git-sync-deps
+          mkdir build && cd build
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON ..
+          ninja glslc
+
+          # Install glslc
+          sudo cp glslc/glslc /usr/local/bin/
+          sudo chmod +x /usr/local/bin/glslc
 
           # Verify glslc is available
           which glslc
