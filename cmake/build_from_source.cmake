@@ -170,19 +170,22 @@ set(_core_submodules
     # Note: CoreML and MPS use system frameworks, no external submodules
 )
 
+# Vulkan backend submodules (only needed when Vulkan is enabled)
 set(_vulkan_submodules
-    backends/vulkan/runtime/vk_api/volk
-    backends/vulkan/runtime/vk_api/Vulkan-Headers
+    backends/vulkan/third-party/Vulkan-Headers
+    backends/vulkan/third-party/VulkanMemoryAllocator
+    backends/vulkan/third-party/volk
 )
 
 if(EXISTS "${executorch_SOURCE_DIR}/CMakeLists.txt")
     message(STATUS "ExecuTorch v${EXECUTORCH_VERSION} already present at ${executorch_SOURCE_DIR}")
 
     # If Vulkan is requested but submodules are missing, fetch them separately
-    if(ET_BUILD_VULKAN AND GLSLC_EXECUTABLE)
+    if(EXECUTORCH_BUILD_VULKAN)
         set(_vulkan_submodules_missing FALSE)
         foreach(_submod ${_vulkan_submodules})
-            if(NOT EXISTS "${executorch_SOURCE_DIR}/${_submod}/CMakeLists.txt")
+            if(NOT EXISTS "${executorch_SOURCE_DIR}/${_submod}/CMakeLists.txt"
+               AND NOT EXISTS "${executorch_SOURCE_DIR}/${_submod}/include")
                 set(_vulkan_submodules_missing TRUE)
                 break()
             endif()
@@ -192,8 +195,9 @@ if(EXISTS "${executorch_SOURCE_DIR}/CMakeLists.txt")
             message(STATUS "Vulkan submodules missing, fetching them...")
             execute_process(
                 COMMAND git submodule update --init --recursive
-                    backends/vulkan/runtime/vk_api/volk
-                    backends/vulkan/runtime/vk_api/Vulkan-Headers
+                    backends/vulkan/third-party/Vulkan-Headers
+                    backends/vulkan/third-party/VulkanMemoryAllocator
+                    backends/vulkan/third-party/volk
                 WORKING_DIRECTORY ${executorch_SOURCE_DIR}
                 RESULT_VARIABLE _git_result
             )
@@ -214,7 +218,7 @@ else()
     set(_git_submodules ${_core_submodules})
 
     # Add Vulkan submodules if Vulkan backend is enabled
-    if(ET_BUILD_VULKAN AND GLSLC_EXECUTABLE)
+    if(EXECUTORCH_BUILD_VULKAN)
         message(STATUS "Including Vulkan submodules for initial fetch")
         list(APPEND _git_submodules ${_vulkan_submodules})
     endif()
