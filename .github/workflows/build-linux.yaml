@@ -48,9 +48,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y vulkan-sdk
 
-          # Verify glslc is available
-          which glslc
+      - name: Verify Vulkan SDK
+        run: |
+          echo "Verifying glslc is available..."
+          which glslc || (echo "ERROR: glslc not found" && exit 1)
           glslc --version
+          echo "Vulkan SDK verified successfully"
 
       - name: Run build script
         run: |
@@ -96,9 +99,12 @@ jobs:
           sudo cp glslc/glslc /usr/local/bin/
           sudo chmod +x /usr/local/bin/glslc
 
-          # Verify glslc is available
-          which glslc
+      - name: Verify Vulkan SDK
+        run: |
+          echo "Verifying glslc is available..."
+          which glslc || (echo "ERROR: glslc not found" && exit 1)
           glslc --version
+          echo "glslc verified successfully"
 
       - name: Run build script
         run: |

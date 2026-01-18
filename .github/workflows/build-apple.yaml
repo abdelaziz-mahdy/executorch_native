@@ -35,9 +35,13 @@ jobs:
       - name: Install Vulkan SDK (MoltenVK + shaderc)
         run: |
           brew install shaderc molten-vk
-          # Verify glslc is available
-          which glslc
+
+      - name: Verify Vulkan SDK
+        run: |
+          echo "Verifying glslc is available..."
+          which glslc || (echo "ERROR: glslc not found" && exit 1)
           glslc --version
+          echo "Vulkan SDK verified successfully"
 
       - name: Run build script
         run: |
@@ -67,9 +71,13 @@ jobs:
       - name: Install Vulkan SDK (MoltenVK + shaderc)
         run: |
           brew install shaderc molten-vk
-          # Verify glslc is available
-          which glslc
+
+      - name: Verify Vulkan SDK
+        run: |
+          echo "Verifying glslc is available..."
+          which glslc || (echo "ERROR: glslc not found" && exit 1)
           glslc --version
+          echo "Vulkan SDK verified successfully"
 
       - name: Run build script
         run: |

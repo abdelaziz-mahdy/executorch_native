@@ -43,18 +43,22 @@ jobs:
           if [ -n "$NDK_GLSLC" ]; then
             echo "Found glslc in NDK: $NDK_GLSLC"
             echo "$(dirname $NDK_GLSLC)" >> $GITHUB_PATH
-            $NDK_GLSLC --version
           else
             echo "glslc not found in NDK, installing Vulkan SDK..."
             # Install Vulkan SDK as fallback
-            wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo gpg --dearmor -o /etc/apt/keyrings/lunarg.gpg
-            sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan.list \
-              "https://packages.lunarg.com/vulkan/1.3.290.0/lunarg-vulkan-1.3.290.0-jammy.list"
+            wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+            sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
+              "https://packages.lunarg.com/vulkan/1.3.290/lunarg-vulkan-1.3.290-jammy.list"
             sudo apt-get update
             sudo apt-get install -y vulkan-sdk
-            which glslc
-            glslc --version
           fi
+
+      - name: Verify Vulkan SDK
+        run: |
+          echo "Verifying glslc is available..."
+          which glslc || (echo "ERROR: glslc not found" && exit 1)
+          glslc --version
+          echo "Vulkan SDK verified successfully"
 
       - name: Run build script
         run: |
