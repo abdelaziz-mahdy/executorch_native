@@ -17,8 +17,8 @@ concurrency:
 
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
-  # ExecuTorch Vulkan backend requires glslc 1.4.321+ for GL_EXT_integer_dot_product
-  VULKAN_SDK_VERSION: '1.4.313'
+  # ExecuTorch Vulkan backend requires glslc with GL_EXT_integer_dot_product support
+  VULKAN_SDK_VERSION: '1.4.304'
 
 jobs:
   build-x64:
