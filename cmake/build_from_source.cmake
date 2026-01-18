@@ -297,6 +297,70 @@ else()
     endif()
 endif()
 
+# ============================================================================
+# Patch ExecuTorch's ShaderLibrary.cmake for Vulkan builds
+# ============================================================================
+# ExecuTorch's ShaderLibrary.cmake has a bug where it uses DEPENDS ${shaders_path}/*
+# but CMake's add_custom_command doesn't expand glob patterns - it creates a literal
+# dependency on a file named "*" which doesn't exist.
+# We patch this by using file(GLOB) to expand the pattern properly.
+
+if(EXECUTORCH_BUILD_VULKAN)
+    set(_shader_library_cmake "${executorch_SOURCE_DIR}/backends/vulkan/cmake/ShaderLibrary.cmake")
+    if(EXISTS "${_shader_library_cmake}")
+        message(STATUS "Patching ShaderLibrary.cmake for glob expansion...")
+        file(READ "${_shader_library_cmake}" _shader_lib_content)
+
+        # Check if already patched (avoid double-patching)
+        string(FIND "${_shader_lib_content}" "_ET_SHADER_GLOB_DEPS" _already_patched)
+
+        if(_already_patched EQUAL -1)
+            # CMake's add_custom_command DEPENDS doesn't expand glob patterns like ${path}/*
+            # It creates a literal dependency on a file named "*" which doesn't exist
+            # We patch this by:
+            # 1. Adding a file(GLOB) call at the start of the gen_vulkan_shader_lib_cpp function
+            # 2. Replacing the wildcard DEPENDS with the glob result variable
+
+            # Step 1: Insert file(GLOB) at the start of the function
+            # This ensures the glob is expanded before the add_custom_command
+            string(REPLACE
+                "function(gen_vulkan_shader_lib_cpp shaders_path)"
+                "function(gen_vulkan_shader_lib_cpp shaders_path)
+  # Expand shader glob pattern (CMake DEPENDS doesn't support wildcards)
+  # Patched by executorch_native build system
+  file(GLOB _ET_SHADER_GLOB_DEPS \"\${shaders_path}/*.glsl\" \"\${shaders_path}/*.glslh\")"
+                _shader_lib_content "${_shader_lib_content}")
+
+            # Step 2: Replace the wildcard DEPENDS with the expanded variable
+            string(REPLACE
+                "DEPENDS \${shaders_path}/*"
+                "DEPENDS \${_ET_SHADER_GLOB_DEPS}"
+                _shader_lib_content "${_shader_lib_content}")
+
+            file(WRITE "${_shader_library_cmake}" "${_shader_lib_content}")
+            message(STATUS "ShaderLibrary.cmake patched successfully")
+
+            # Verify the patch worked
+            file(READ "${_shader_library_cmake}" _verify_content)
+            string(FIND "${_verify_content}" "_ET_SHADER_GLOB_DEPS" _patch_verified)
+            if(_patch_verified EQUAL -1)
+                message(WARNING "Patch verification failed - the pattern may not have matched")
+                message(STATUS "Looking for DEPENDS pattern in ShaderLibrary.cmake...")
+                string(FIND "${_verify_content}" "DEPENDS \${shaders_path}" _found_original)
+                if(NOT _found_original EQUAL -1)
+                    message(STATUS "  Original pattern still exists - replacement failed")
+                endif()
+            else()
+                message(STATUS "Patch verified successfully")
+            endif()
+        else()
+            message(STATUS "ShaderLibrary.cmake already patched, skipping")
+        endif()
+    else()
+        message(WARNING "ShaderLibrary.cmake not found at ${_shader_library_cmake}")
+    endif()
+endif()
+
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
 message(STATUS "  EXECUTORCH_BUILD_VULKAN: ${EXECUTORCH_BUILD_VULKAN}")
