@@ -258,6 +258,29 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 # ============================================================================
+# 16KB Page Size Alignment
+# ============================================================================
+# Required for Android 15+ devices and beneficial for ARM64 platforms.
+# - Android: Required by Google Play for 16KB page size support
+# - iOS/macOS ARM64: Already uses 16KB pages natively
+# - Linux ARM64: Some distros use 16KB/64KB pages
+# - x64 platforms: Doesn't hurt, provides future compatibility
+
+if(NOT WIN32)
+    # Use max-page-size linker flag for ELF binaries (Linux, Android)
+    # Apple platforms use different linker but ARM64 is already 16KB aligned
+    if(CMAKE_SYSTEM_NAME STREQUAL "Android" OR (UNIX AND NOT APPLE))
+        target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-z,max-page-size=16384")
+        message(STATUS "  16KB page alignment: enabled (ELF)")
+    elseif(APPLE)
+        # Apple ARM64 already uses 16KB pages by default
+        # For Intel Macs, this ensures compatibility
+        target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-segalign,0x4000")
+        message(STATUS "  16KB page alignment: enabled (Mach-O)")
+    endif()
+endif()
+
+# ============================================================================
 # Install Rules
 # ============================================================================
 
