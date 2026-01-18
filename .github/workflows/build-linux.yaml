@@ -93,9 +93,10 @@ jobs:
           ./utils/git-sync-deps
           mkdir build && cd build
           cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON ..
-          ninja glslc
+          # Build glslc_exe target (not just glslc which is a library)
+          ninja glslc_exe
 
-          # Install glslc
+          # Install glslc executable
           sudo cp glslc/glslc /usr/local/bin/
           sudo chmod +x /usr/local/bin/glslc
 
