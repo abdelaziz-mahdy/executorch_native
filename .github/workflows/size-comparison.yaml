@@ -1,0 +1,123 @@
+name: Size Comparison Report
+
+on:
+  # Trigger after all platform build workflows complete
+  workflow_run:
+    workflows:
+      - "Build Linux"
+      - "Build Windows"
+      - "Build Android"
+      - "Build Apple (macOS + iOS)"
+    types:
+      - completed
+    branches:
+      - main
+
+  # Manual trigger with specific release tag
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to analyze (e.g., v1.0.1.20)'
+        required: true
+        type: string
+
+concurrency:
+  group: size-comparison-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare-sizes:
+    runs-on: ubuntu-latest
+    # Run on manual trigger OR when a workflow_run completes successfully on a tag
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'refs/tags/v'))
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pygal lxml
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+          else
+            # For workflow_run, extract the tag from the triggering workflow
+            TAG="${{ github.event.workflow_run.head_branch }}"
+            # Strip refs/tags/ prefix if present
+            TAG="${TAG#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Analyzing release: $TAG"
+
+      - name: Wait for all build workflows to complete
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "Waiting for all platform builds to complete..."
+          # Add a small delay to ensure all assets are uploaded
+          sleep 60
+
+      - name: Analyze artifact sizes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python scripts/analyze-sizes.py
+
+      - name: Upload size report artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-report
+          path: |
+            size-report.svg
+            size-report.json
+          retention-days: 90
+
+      - name: Upload SVG to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "Uploading size report to release: $TAG"
+
+          # Check if release exists
+          if ! gh release view "$TAG" &>/dev/null; then
+            echo "Warning: Release $TAG does not exist. Skipping upload."
+            exit 0
+          fi
+
+          # Upload files (--clobber overwrites existing)
+          gh release upload "$TAG" size-report.svg size-report.json --clobber || {
+            echo "Warning: Failed to upload to release. Files saved as artifacts."
+          }
+
+          echo "Size report uploaded to release: $TAG"
+
+      - name: Generate summary
+        run: |
+          echo "## Size Comparison Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** ${{ steps.tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Downloads" >> $GITHUB_STEP_SUMMARY
+          echo "- [size-report.svg](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/size-report.svg)" >> $GITHUB_STEP_SUMMARY
+          echo "- [size-report.json](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/size-report.json)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### JSON Report" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat size-report.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
