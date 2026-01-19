@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Analyze ExecuTorch FFI build artifact sizes and generate SVG visualization.
+Analyze ExecuTorch FFI build artifact sizes and generate SVG visualizations.
 
-Generates a single SVG with platform cards for both release and debug builds.
+Generates separate SVGs for release and debug builds with platform cards.
 """
 
 import os
@@ -30,6 +30,10 @@ class ArtifactInfo:
     @property
     def backend_key(self) -> str:
         return "-".join(sorted(self.backends))
+
+    @property
+    def backend_count(self) -> int:
+        return len(self.backends)
 
 
 def parse_artifact_name(filename: str, size_bytes: int) -> Optional[ArtifactInfo]:
@@ -95,15 +99,19 @@ def fetch_release_assets(tag: str, repo: str) -> List[Dict]:
         sys.exit(1)
 
 
-def generate_combined_svg(artifacts: List[ArtifactInfo], tag: str, output_path: str):
-    """Generate combined SVG with release and debug sections."""
+def generate_svg(artifacts: List[ArtifactInfo], build_type: str, tag: str, output_path: str):
+    """Generate SVG for one build type."""
+    filtered = [a for a in artifacts if a.build_type == build_type]
+    if not filtered:
+        print(f"No {build_type} artifacts found, skipping")
+        return
 
     # Platform display order and names
     platform_order = ['android', 'ios', 'ios-simulator', 'macos', 'linux', 'windows']
     platform_names = {
         'android': 'Android',
         'ios': 'iOS',
-        'ios-simulator': 'iOS Sim',
+        'ios-simulator': 'iOS Simulator',
         'macos': 'macOS',
         'linux': 'Linux',
         'windows': 'Windows'
@@ -114,206 +122,202 @@ def generate_combined_svg(artifacts: List[ArtifactInfo], tag: str, output_path: 
         'card_bg': '#ffffff',
         'card_border': '#e1e4e8',
         'header_bg': '#f6f8fa',
-        'section_bg': '#eef1f4',
         'xnnpack': '#3498db',
         'vulkan': '#e67e22',
         'coreml': '#27ae60',
         'mps': '#9b59b6',
     }
 
-    # Find global max for consistent scaling across both sections
-    max_size = max(a.size_mb for a in artifacts)
+    # Group by platform, then by arch
+    platforms: Dict[str, Dict[str, List[ArtifactInfo]]] = {}
+    for a in filtered:
+        if a.platform not in platforms:
+            platforms[a.platform] = {}
+        if a.arch not in platforms[a.platform]:
+            platforms[a.platform][a.arch] = []
+        platforms[a.platform][a.arch].append(a)
+
+    # Find max size for scaling (only from artifacts we'll display)
+    display_artifacts = []
+    for platform_data in platforms.values():
+        for arts in platform_data.values():
+            baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
+            baseline_size = baseline.size_mb if baseline else 0
+            for a in arts:
+                # Only show: baseline OR single-backend additions with meaningful delta
+                is_baseline = a.backend_key == 'xnnpack'
+                is_single_addition = a.backend_count == 2 and 'xnnpack' in a.backends
+                delta = a.size_mb - baseline_size
+                if is_baseline or (is_single_addition and delta > 0.5):
+                    display_artifacts.append(a)
+
+    max_size = max(a.size_mb for a in display_artifacts) if display_artifacts else 1
 
     # Card dimensions
-    card_width = 220
+    card_width = 200
     card_padding = 10
     card_gap = 12
     row_height = 20
-    bar_height = 12
-    bar_max_width = 100
-    section_padding = 15
+    bar_height = 14
+    bar_max_width = 90
     cols = 3
 
     margin = 16
-    title_height = 35
+    title_height = 30
+    note_height = 24
 
-    def calc_section_height(build_type: str) -> tuple:
-        """Calculate section height and card data."""
-        filtered = [a for a in artifacts if a.build_type == build_type]
-        if not filtered:
-            return 0, {}, {}
+    sorted_platforms = sorted(platforms.keys(),
+        key=lambda p: platform_order.index(p) if p in platform_order else 99)
 
-        # Group by platform, then by arch
-        platforms: Dict[str, Dict[str, List[ArtifactInfo]]] = {}
-        for a in filtered:
-            if a.platform not in platforms:
-                platforms[a.platform] = {}
-            if a.arch not in platforms[a.platform]:
-                platforms[a.platform][a.arch] = []
-            platforms[a.platform][a.arch].append(a)
+    # Calculate card heights
+    card_heights = {}
+    for platform in sorted_platforms:
+        archs = platforms[platform]
+        rows = 0
+        for arch, arts in archs.items():
+            rows += 1  # arch header
+            baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
+            baseline_size = baseline.size_mb if baseline else 0
+            for a in arts:
+                is_baseline = a.backend_key == 'xnnpack'
+                is_single_addition = a.backend_count == 2 and 'xnnpack' in a.backends
+                delta = a.size_mb - baseline_size
+                if is_baseline or (is_single_addition and delta > 0.5):
+                    rows += 1
+        card_heights[platform] = 28 + rows * row_height + card_padding
 
-        sorted_platforms = sorted(platforms.keys(),
-            key=lambda p: platform_order.index(p) if p in platform_order else 99)
+    # Calculate layout
+    current_x = 0
+    max_row_height = 0
+    total_rows_height = 0
 
-        # Calculate card heights
-        card_heights = {}
-        for platform in sorted_platforms:
-            archs = platforms[platform]
-            rows = 0
-            for arch, arts in archs.items():
-                rows += 1  # arch header
-                baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
-                baseline_size = baseline.size_mb if baseline else 0
-                for a in arts:
-                    if a.backend_key == 'xnnpack' or (a.size_mb - baseline_size) > 0.5:
-                        rows += 1
-            card_heights[platform] = 32 + rows * row_height + card_padding
+    for i, platform in enumerate(sorted_platforms):
+        h = card_heights[platform]
+        if current_x + card_width > cols * (card_width + card_gap):
+            current_x = 0
+            total_rows_height += max_row_height + card_gap
+            max_row_height = 0
+        max_row_height = max(max_row_height, h)
+        current_x += card_width + card_gap
 
-        # Calculate total section height
-        current_x = 0
-        max_row_height = 0
-        section_height = 30  # section header
-
-        for platform in sorted_platforms:
-            h = card_heights[platform]
-            if current_x + card_width > cols * (card_width + card_gap):
-                current_x = 0
-                section_height += max_row_height + card_gap
-                max_row_height = 0
-            max_row_height = max(max_row_height, h)
-            current_x += card_width + card_gap
-
-        section_height += max_row_height + section_padding
-
-        return section_height, platforms, card_heights
-
-    release_height, release_platforms, release_card_heights = calc_section_height('release')
-    debug_height, debug_platforms, debug_card_heights = calc_section_height('debug')
+    total_rows_height += max_row_height
 
     total_width = margin * 2 + cols * card_width + (cols - 1) * card_gap
-    total_height = title_height + release_height + debug_height + margin + 25  # +25 for legend
+    total_height = title_height + total_rows_height + note_height + margin + 20
 
     # Build SVG
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_width} {total_height}">',
         '<style>',
-        '  .title { font: bold 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #24292e; }',
-        '  .section-title { font: bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #24292e; }',
+        '  .title { font: bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #24292e; }',
         '  .platform-name { font: bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #24292e; }',
         '  .arch-name { font: 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #586069; }',
         '  .size-value { font: 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #24292e; }',
         '  .delta { font: 8px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #22863a; }',
         '  .bar-label { font: 7px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: white; }',
-        '  .legend { font: 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #586069; }',
+        '  .legend { font: 8px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #586069; }',
+        '  .note { font: italic 8px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; fill: #6a737d; }',
         '</style>',
         f'<rect width="{total_width}" height="{total_height}" fill="#f6f8fa"/>',
-        f'<text x="{total_width/2}" y="22" text-anchor="middle" class="title">ExecuTorch Library Sizes ({tag})</text>',
+        f'<text x="{total_width/2}" y="20" text-anchor="middle" class="title">{build_type.capitalize()} Build Sizes ({tag})</text>',
     ]
 
-    def draw_section(build_type: str, platforms_data: Dict, card_heights: Dict, start_y: float):
-        """Draw a section (release or debug)."""
-        if not platforms_data:
-            return
+    # Draw cards
+    current_x = margin
+    current_y = title_height
+    max_row_height = 0
 
-        sorted_platforms = sorted(platforms_data.keys(),
-            key=lambda p: platform_order.index(p) if p in platform_order else 99)
+    for platform in sorted_platforms:
+        h = card_heights[platform]
+        archs = platforms[platform]
 
-        # Section header
-        svg.append(f'<text x="{margin}" y="{start_y + 18}" class="section-title">{build_type.upper()}</text>')
+        if current_x + card_width > margin + cols * (card_width + card_gap):
+            current_x = margin
+            current_y += max_row_height + card_gap
+            max_row_height = 0
 
-        current_x = margin
-        current_y = start_y + 28
-        max_row_height = 0
+        x, y = current_x, current_y
+        max_row_height = max(max_row_height, h)
+        current_x += card_width + card_gap
 
-        for platform in sorted_platforms:
-            h = card_heights[platform]
-            archs = platforms_data[platform]
+        # Card background
+        svg.append(f'<rect x="{x}" y="{y}" width="{card_width}" height="{h}" fill="{colors["card_bg"]}" stroke="{colors["card_border"]}" rx="4"/>')
 
-            if current_x + card_width > margin + cols * (card_width + card_gap):
-                current_x = margin
-                current_y += max_row_height + card_gap
-                max_row_height = 0
+        # Platform header
+        svg.append(f'<rect x="{x}" y="{y}" width="{card_width}" height="22" fill="{colors["header_bg"]}" rx="4"/>')
+        svg.append(f'<rect x="{x}" y="{y + 18}" width="{card_width}" height="4" fill="{colors["header_bg"]}"/>')
+        svg.append(f'<text x="{x + card_padding}" y="{y + 15}" class="platform-name">{platform_names.get(platform, platform)}</text>')
 
-            x, y = current_x, current_y
-            max_row_height = max(max_row_height, h)
-            current_x += card_width + card_gap
+        row_y = y + 26
+        arch_order = ['arm64-v8a', 'armeabi-v7a', 'arm64', 'x86_64', 'x86', 'x64']
+        sorted_archs = sorted(archs.keys(), key=lambda a: arch_order.index(a) if a in arch_order else 99)
 
-            # Card background
-            svg.append(f'<rect x="{x}" y="{y}" width="{card_width}" height="{h}" fill="{colors["card_bg"]}" stroke="{colors["card_border"]}" rx="4"/>')
+        for arch in sorted_archs:
+            arts = archs[arch]
+            baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
+            baseline_size = baseline.size_mb if baseline else 0
 
-            # Platform header
-            svg.append(f'<rect x="{x}" y="{y}" width="{card_width}" height="24" fill="{colors["header_bg"]}" rx="4"/>')
-            svg.append(f'<rect x="{x}" y="{y + 20}" width="{card_width}" height="4" fill="{colors["header_bg"]}"/>')
-            svg.append(f'<text x="{x + card_padding}" y="{y + 16}" class="platform-name">{platform_names.get(platform, platform)}</text>')
+            # Arch label
+            svg.append(f'<text x="{x + card_padding}" y="{row_y + 9}" class="arch-name">{arch}</text>')
+            row_y += row_height
 
-            row_y = y + 30
-            arch_order = ['arm64-v8a', 'armeabi-v7a', 'arm64', 'x86_64', 'x86', 'x64']
-            sorted_archs = sorted(archs.keys(), key=lambda a: arch_order.index(a) if a in arch_order else 99)
+            # Sort by size, filter to meaningful single-backend additions only
+            sorted_arts = sorted(arts, key=lambda a: a.size_mb)
+            for artifact in sorted_arts:
+                backend = artifact.backend_key
+                size = artifact.size_mb
+                delta = size - baseline_size
 
-            for arch in sorted_archs:
-                arts = archs[arch]
-                baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
-                baseline_size = baseline.size_mb if baseline else 0
+                # Only show: baseline OR single-backend additions with meaningful delta
+                is_baseline = backend == 'xnnpack'
+                is_single_addition = artifact.backend_count == 2 and 'xnnpack' in artifact.backends
 
-                # Arch label
-                svg.append(f'<text x="{x + card_padding}" y="{row_y + 9}" class="arch-name">{arch}</text>')
+                if not is_baseline and not (is_single_addition and delta > 0.5):
+                    continue
+
+                # Determine color and label based on the added backend
+                if backend == 'xnnpack':
+                    color = colors['xnnpack']
+                    label = 'XNNPACK'
+                elif 'vulkan' in artifact.backends:
+                    color = colors['vulkan']
+                    label = '+Vulkan'
+                elif 'coreml' in artifact.backends:
+                    color = colors['coreml']
+                    label = '+CoreML'
+                elif 'mps' in artifact.backends:
+                    color = colors['mps']
+                    label = '+MPS'
+                else:
+                    color = '#95a5a6'
+                    label = backend
+
+                # Bar
+                bar_width = (size / max_size) * bar_max_width
+                bar_x = x + card_padding
+                svg.append(f'<rect x="{bar_x}" y="{row_y}" width="{bar_width}" height="{bar_height}" fill="{color}" rx="2"/>')
+
+                # Label on bar
+                if bar_width > 35:
+                    svg.append(f'<text x="{bar_x + 3}" y="{row_y + 10}" class="bar-label">{label}</text>')
+
+                # Size value
+                value_x = bar_x + bar_max_width + 6
+                svg.append(f'<text x="{value_x}" y="{row_y + 10}" class="size-value">{size:.1f} MB</text>')
+
+                # Delta
+                if not is_baseline and delta > 0.5:
+                    delta_x = value_x + 42
+                    svg.append(f'<text x="{delta_x}" y="{row_y + 10}" class="delta">+{delta:.1f}</text>')
+
                 row_y += row_height
 
-                sorted_arts = sorted(arts, key=lambda a: a.size_mb)
-                for artifact in sorted_arts:
-                    backend = artifact.backend_key
-                    size = artifact.size_mb
-                    delta = size - baseline_size if baseline_size else 0
-
-                    if backend != 'xnnpack' and delta <= 0.5:
-                        continue
-
-                    # Determine color and label
-                    if backend == 'xnnpack':
-                        color = colors['xnnpack']
-                        label = 'XNNPACK'
-                    elif 'vulkan' in backend:
-                        color = colors['vulkan']
-                        label = '+Vulkan'
-                    elif 'mps' in backend and 'coreml' in backend:
-                        color = colors['mps']
-                        label = '+C+M'
-                    elif 'coreml' in backend:
-                        color = colors['coreml']
-                        label = '+CoreML'
-                    elif 'mps' in backend:
-                        color = colors['mps']
-                        label = '+MPS'
-                    else:
-                        color = '#95a5a6'
-                        label = '+'
-
-                    # Bar
-                    bar_width = (size / max_size) * bar_max_width
-                    bar_x = x + card_padding
-                    svg.append(f'<rect x="{bar_x}" y="{row_y}" width="{bar_width}" height="{bar_height}" fill="{color}" rx="2"/>')
-
-                    # Label on bar
-                    if bar_width > 30:
-                        svg.append(f'<text x="{bar_x + 3}" y="{row_y + 9}" class="bar-label">{label}</text>')
-
-                    # Size value
-                    value_x = bar_x + bar_max_width + 6
-                    svg.append(f'<text x="{value_x}" y="{row_y + 9}" class="size-value">{size:.1f}</text>')
-
-                    # Delta
-                    if backend != 'xnnpack' and delta > 0.5:
-                        delta_x = value_x + 28
-                        svg.append(f'<text x="{delta_x}" y="{row_y + 9}" class="delta">+{delta:.0f}</text>')
-
-                    row_y += row_height
-
-    # Draw sections
-    draw_section('release', release_platforms, release_card_heights, title_height)
-    draw_section('debug', debug_platforms, debug_card_heights, title_height + release_height)
+    # Note about excluded backends
+    note_y = total_height - margin - 18
+    svg.append(f'<text x="{margin}" y="{note_y}" class="note">* Backends with &lt;0.5 MB size impact and multi-backend combinations are excluded</text>')
 
     # Legend
-    legend_y = total_height - 12
+    legend_y = total_height - margin
     legend_items = [
         (colors['xnnpack'], 'XNNPACK'),
         (colors['vulkan'], '+Vulkan'),
@@ -323,10 +327,8 @@ def generate_combined_svg(artifacts: List[ArtifactInfo], tag: str, output_path: 
     legend_x = margin
     for color, label in legend_items:
         svg.append(f'<rect x="{legend_x}" y="{legend_y - 7}" width="8" height="8" fill="{color}" rx="1"/>')
-        svg.append(f'<text x="{legend_x + 11}" y="{legend_y}" class="legend">{label}</text>')
-        legend_x += 70
-
-    svg.append(f'<text x="{total_width - margin}" y="{legend_y}" text-anchor="end" class="legend">Sizes in MB</text>')
+        svg.append(f'<text x="{legend_x + 10}" y="{legend_y}" class="legend">{label}</text>')
+        legend_x += 65
 
     svg.append('</svg>')
 
@@ -356,10 +358,11 @@ def main():
         print("No artifacts found", file=sys.stderr)
         sys.exit(1)
 
-    # Generate single combined SVG
-    generate_combined_svg(artifacts, tag, 'size-report.svg')
+    # Generate separate SVGs
+    generate_svg(artifacts, 'release', tag, 'size-report-release.svg')
+    generate_svg(artifacts, 'debug', tag, 'size-report-debug.svg')
 
-    # Generate JSON report
+    # Generate JSON report (all artifacts)
     report = {
         'release_tag': tag,
         'generated_at': datetime.now(timezone.utc).isoformat(),
