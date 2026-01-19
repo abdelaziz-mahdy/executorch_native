@@ -138,17 +138,14 @@ def generate_svg(artifacts: List[ArtifactInfo], build_type: str, tag: str, outpu
         platforms[a.platform][a.arch].append(a)
 
     # Find max size for scaling (only from artifacts we'll display)
+    # Show: baseline + all single-backend additions (regardless of delta)
     display_artifacts = []
     for platform_data in platforms.values():
         for arts in platform_data.values():
-            baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
-            baseline_size = baseline.size_mb if baseline else 0
             for a in arts:
-                # Only show: baseline OR single-backend additions with meaningful delta
                 is_baseline = a.backend_key == 'xnnpack'
                 is_single_addition = a.backend_count == 2 and 'xnnpack' in a.backends
-                delta = a.size_mb - baseline_size
-                if is_baseline or (is_single_addition and delta > 0.5):
+                if is_baseline or is_single_addition:
                     display_artifacts.append(a)
 
     max_size = max(a.size_mb for a in display_artifacts) if display_artifacts else 1
@@ -176,13 +173,10 @@ def generate_svg(artifacts: List[ArtifactInfo], build_type: str, tag: str, outpu
         rows = 0
         for arch, arts in archs.items():
             rows += 1  # arch header
-            baseline = next((a for a in arts if a.backend_key == 'xnnpack'), None)
-            baseline_size = baseline.size_mb if baseline else 0
             for a in arts:
                 is_baseline = a.backend_key == 'xnnpack'
                 is_single_addition = a.backend_count == 2 and 'xnnpack' in a.backends
-                delta = a.size_mb - baseline_size
-                if is_baseline or (is_single_addition and delta > 0.5):
+                if is_baseline or is_single_addition:
                     rows += 1
         card_heights[platform] = 28 + rows * row_height + card_padding
 
@@ -261,18 +255,18 @@ def generate_svg(artifacts: List[ArtifactInfo], build_type: str, tag: str, outpu
             svg.append(f'<text x="{x + card_padding}" y="{row_y + 9}" class="arch-name">{arch}</text>')
             row_y += row_height
 
-            # Sort by size, filter to meaningful single-backend additions only
+            # Sort by size, show baseline + all single-backend additions
             sorted_arts = sorted(arts, key=lambda a: a.size_mb)
             for artifact in sorted_arts:
                 backend = artifact.backend_key
                 size = artifact.size_mb
                 delta = size - baseline_size
 
-                # Only show: baseline OR single-backend additions with meaningful delta
+                # Only show: baseline OR single-backend additions
                 is_baseline = backend == 'xnnpack'
                 is_single_addition = artifact.backend_count == 2 and 'xnnpack' in artifact.backends
 
-                if not is_baseline and not (is_single_addition and delta > 0.5):
+                if not is_baseline and not is_single_addition:
                     continue
 
                 # Determine color and label based on the added backend
@@ -305,16 +299,19 @@ def generate_svg(artifacts: List[ArtifactInfo], build_type: str, tag: str, outpu
                 value_x = bar_x + bar_max_width + 6
                 svg.append(f'<text x="{value_x}" y="{row_y + 10}" class="size-value">{size:.1f} MB</text>')
 
-                # Delta
+                # Delta (only show if meaningful)
                 if not is_baseline and delta > 0.5:
                     delta_x = value_x + 42
                     svg.append(f'<text x="{delta_x}" y="{row_y + 10}" class="delta">+{delta:.1f}</text>')
+                elif not is_baseline and delta <= 0.5:
+                    delta_x = value_x + 42
+                    svg.append(f'<text x="{delta_x}" y="{row_y + 10}" class="delta" fill="#6a737d">~0</text>')
 
                 row_y += row_height
 
     # Note about excluded backends
     note_y = total_height - margin - 18
-    svg.append(f'<text x="{margin}" y="{note_y}" class="note">* Backends with &lt;0.5 MB size impact and multi-backend combinations are excluded</text>')
+    svg.append(f'<text x="{margin}" y="{note_y}" class="note">* Multi-backend combinations excluded. ~0 means negligible size difference.</text>')
 
     # Legend
     legend_y = total_height - margin
