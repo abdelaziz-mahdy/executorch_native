@@ -17,8 +17,6 @@ concurrency:
 
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
-  # ExecuTorch Vulkan backend requires glslc with GL_EXT_integer_dot_product support
-  VULKAN_SDK_VERSION: '1.4.321'
 
 jobs:
   build:
@@ -41,25 +39,31 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
           echo "ANDROID_NDK=$ANDROID_NDK" >> $GITHUB_ENV
 
-      - name: Install Vulkan SDK
+      - name: Install Vulkan tools (build shaderc for glslc)
         run: |
-          # Always install Vulkan SDK for glslc with GL_EXT_integer_dot_product support
-          # NDK glslc may be too old for ExecuTorch's Vulkan shaders
+          # Build shaderc from source to get latest glslc with GL_EXT_integer_dot_product support
+          # The apt packages have older glslc that doesn't support this extension
           sudo apt-get update
-          sudo apt-get install -y wget gnupg2 software-properties-common
+          sudo apt-get install -y cmake ninja-build python3 git
 
-          wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
-          sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list \
-            "https://packages.lunarg.com/vulkan/${{ env.VULKAN_SDK_VERSION }}/lunarg-vulkan-${{ env.VULKAN_SDK_VERSION }}-jammy.list"
-          sudo apt-get update
-          sudo apt-get install -y vulkan-sdk
+          # Clone and build shaderc
+          git clone https://github.com/google/shaderc.git /tmp/shaderc
+          cd /tmp/shaderc
+          ./utils/git-sync-deps
+          mkdir build && cd build
+          cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON ..
+          ninja glslc_exe
+
+          # Install glslc executable
+          sudo cp glslc/glslc /usr/local/bin/
+          sudo chmod +x /usr/local/bin/glslc
 
       - name: Verify Vulkan SDK
         run: |
           echo "Verifying glslc is available..."
           which glslc || (echo "ERROR: glslc not found" && exit 1)
           glslc --version
-          echo "Vulkan SDK verified successfully"
+          echo "glslc verified successfully"
 
       - name: Run build script
         run: |

@@ -17,9 +17,6 @@ concurrency:
 
 env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
-  # ExecuTorch Vulkan backend requires glslc with GL_EXT_integer_dot_product support
-  # Note: Windows Vulkan SDK uses 4-part version while Linux uses 3-part
-  VULKAN_SDK_VERSION: '1.4.321.0'
 
 jobs:
   build:
@@ -35,45 +32,63 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Vulkan SDK
+      - name: Install Vulkan tools (build shaderc for glslc)
         shell: pwsh
         run: |
-          $VulkanInstallerUrl = "https://sdk.lunarg.com/sdk/download/${{ env.VULKAN_SDK_VERSION }}/windows/VulkanSDK-${{ env.VULKAN_SDK_VERSION }}-Installer.exe"
-          $VulkanInstallerPath = "$env:TEMP\VulkanSDK-Installer.exe"
-          $VulkanInstallDir = "C:\VulkanSDK\${{ env.VULKAN_SDK_VERSION }}"
+          # Build shaderc from source to get latest glslc with GL_EXT_integer_dot_product support
+          # The Vulkan SDK installer may have older glslc that doesn't support this extension
 
-          Write-Host "Downloading Vulkan SDK ${{ env.VULKAN_SDK_VERSION }}..."
-          Invoke-WebRequest -Uri $VulkanInstallerUrl -OutFile $VulkanInstallerPath -UseBasicParsing
+          Write-Host "Cloning shaderc repository..."
+          git clone https://github.com/google/shaderc.git C:\shaderc
 
-          Write-Host "Installing Vulkan SDK..."
-          Start-Process -FilePath $VulkanInstallerPath -ArgumentList "--accept-licenses --default-answer --confirm-command install" -Wait -NoNewWindow
+          Set-Location C:\shaderc
+          Write-Host "Syncing shaderc dependencies..."
+          python utils/git-sync-deps
 
-          # Set environment variables for subsequent steps
-          echo "VULKAN_SDK=$VulkanInstallDir" >> $env:GITHUB_ENV
-          echo "$VulkanInstallDir\Bin" >> $env:GITHUB_PATH
+          Write-Host "Building shaderc with CMake..."
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          Set-Location build
 
-          Write-Host "Vulkan SDK installation completed"
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DSHADERC_SKIP_TESTS=ON
+          cmake --build . --config Release --target glslc_exe
 
-      - name: Verify Vulkan SDK
+          # Add glslc to PATH for subsequent steps
+          $glslcDir = "C:\shaderc\build\glslc\Release"
+          if (-not (Test-Path "$glslcDir\glslc.exe")) {
+            # Try alternative path (some CMake generators put it differently)
+            $glslcDir = "C:\shaderc\build\glslc"
+            if (-not (Test-Path "$glslcDir\glslc.exe")) {
+              # Search for glslc.exe
+              $found = Get-ChildItem -Path "C:\shaderc\build" -Recurse -Filter "glslc.exe" | Select-Object -First 1
+              if ($found) {
+                $glslcDir = $found.DirectoryName
+              } else {
+                Write-Error "ERROR: glslc.exe not found after build"
+                exit 1
+              }
+            }
+          }
+
+          Write-Host "Found glslc at: $glslcDir"
+          echo "$glslcDir" >> $env:GITHUB_PATH
+          Write-Host "shaderc build completed"
+
+      - name: Verify glslc
         shell: pwsh
         run: |
           echo "Verifying glslc is available..."
           $glslc = Get-Command "glslc" -ErrorAction SilentlyContinue
           if (-not $glslc) {
-            if (Test-Path "$env:VULKAN_SDK\Bin\glslc.exe") {
-              $glslc = "$env:VULKAN_SDK\Bin\glslc.exe"
-            } else {
-              Write-Error "ERROR: glslc not found in PATH or VULKAN_SDK"
-              exit 1
-            }
+            Write-Error "ERROR: glslc not found in PATH"
+            exit 1
           }
           & glslc --version
-          echo "Vulkan SDK verified successfully"
+          echo "glslc verified successfully"
 
       - name: Run build script
         shell: pwsh
         run: |
-          .\scripts\build-windows.ps1 -Version "${{ env.EXECUTORCH_VERSION }}" -VulkanSdkVersion "${{ env.VULKAN_SDK_VERSION }}"
+          .\scripts\build-windows.ps1 -Version "${{ env.EXECUTORCH_VERSION }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
