@@ -19,7 +19,7 @@ env:
   EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
   # ExecuTorch Vulkan backend requires glslc with GL_EXT_integer_dot_product support
   # Note: Windows Vulkan SDK uses 4-part version while Linux uses 3-part
-  VULKAN_SDK_VERSION: '1.4.304.0'
+  VULKAN_SDK_VERSION: '1.4.321.0'
 
 jobs:
   build:
