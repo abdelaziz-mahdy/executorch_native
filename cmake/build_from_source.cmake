@@ -298,6 +298,41 @@ else()
 endif()
 
 # ============================================================================
+# Patch ExecuTorch's gen_vulkan_spv.py for Windows CRLF line endings
+# ============================================================================
+# ExecuTorch's gen_vulkan_spv.py has a bug where the regex r"\\$" doesn't handle
+# Windows CRLF line endings. The $ matches before \n, but with CRLF there's a \r
+# between the backslash and end-of-line, so macro continuations don't get escaped.
+# This causes "unterminated string literal" errors on Windows.
+
+if(EXECUTORCH_BUILD_VULKAN AND WIN32)
+    set(_gen_vulkan_spv "${executorch_SOURCE_DIR}/backends/vulkan/runtime/gen_vulkan_spv.py")
+    if(EXISTS "${_gen_vulkan_spv}")
+        message(STATUS "Patching gen_vulkan_spv.py for Windows CRLF support...")
+        file(READ "${_gen_vulkan_spv}" _gen_spv_content)
+
+        # Check if already patched
+        string(FIND "${_gen_spv_content}" "PATCHED_FOR_CRLF" _already_patched_crlf)
+
+        if(_already_patched_crlf EQUAL -1)
+            # The original regex r"\\$" doesn't match backslash before \r\n on Windows
+            # Change it to r"\\\\r?$" to handle both LF and CRLF line endings
+            string(REPLACE
+                [[input_text = re.sub(r"\\$", r"\\\\", input_text, flags=re.MULTILINE)]]
+                [[# PATCHED_FOR_CRLF: Handle Windows CRLF line endings
+    input_text = input_text.replace("\r\n", "\n")  # Normalize line endings first
+    input_text = re.sub(r"\\$", r"\\\\", input_text, flags=re.MULTILINE)]]
+                _gen_spv_content "${_gen_spv_content}")
+
+            file(WRITE "${_gen_vulkan_spv}" "${_gen_spv_content}")
+            message(STATUS "gen_vulkan_spv.py patched for Windows CRLF support")
+        else()
+            message(STATUS "gen_vulkan_spv.py already patched for CRLF, skipping")
+        endif()
+    endif()
+endif()
+
+# ============================================================================
 # Patch ExecuTorch's ShaderLibrary.cmake for Vulkan builds
 # ============================================================================
 # ExecuTorch's ShaderLibrary.cmake has a bug where it uses DEPENDS ${shaders_path}/*
