@@ -249,3 +249,27 @@ message(STATUS "Found pre-built libraries:")
 foreach(_lib ${_prebuilt_libs})
     message(STATUS "  - ${_lib}")
 endforeach()
+
+# ============================================================================
+# MoltenVK Setup (macOS Vulkan variants only)
+# ============================================================================
+
+# Check if this is a Vulkan variant with bundled MoltenVK
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(_moltenvk_dylib "${EXECUTORCH_INSTALL_DIR}/lib/libMoltenVK.dylib")
+    set(_moltenvk_icd "${EXECUTORCH_INSTALL_DIR}/share/vulkan/icd.d/MoltenVK_icd.json")
+
+    if(EXISTS "${_moltenvk_dylib}")
+        message(STATUS "MoltenVK bundled: ${_moltenvk_dylib}")
+        set(EXECUTORCH_HAS_MOLTENVK TRUE CACHE BOOL "MoltenVK is bundled" FORCE)
+
+        # Set VK_ICD_FILENAMES for this CMake configuration
+        # This helps during build-time validation
+        if(EXISTS "${_moltenvk_icd}")
+            message(STATUS "MoltenVK ICD: ${_moltenvk_icd}")
+            set(ENV{VK_ICD_FILENAMES} "${_moltenvk_icd}")
+        endif()
+    else()
+        set(EXECUTORCH_HAS_MOLTENVK FALSE CACHE BOOL "MoltenVK is bundled" FORCE)
+    endif()
+endif()

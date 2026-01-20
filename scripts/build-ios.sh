@@ -26,6 +26,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
+# MoltenVK paths for iOS (set by find_moltenvk_ios)
+MOLTENVK_IOS_LIB=""
+MOLTENVK_IOS_SIM_LIB=""
+
 # Check for Vulkan SDK / glslc availability (via MoltenVK on iOS/macOS)
 check_vulkan() {
     if command -v glslc &> /dev/null; then
@@ -35,6 +39,26 @@ check_vulkan() {
         return 0
     fi
     return 1
+}
+
+# Find MoltenVK library for iOS from Vulkan SDK (if available)
+# Note: iOS typically uses static linking of MoltenVK via ExecuTorch build
+find_moltenvk_ios() {
+    # Check if VULKAN_SDK is set and has iOS libraries
+    if [ -n "$VULKAN_SDK" ]; then
+        if [ -f "$VULKAN_SDK/MoltenVK/MoltenVK.xcframework/ios-arm64/libMoltenVK.a" ]; then
+            MOLTENVK_IOS_LIB="$VULKAN_SDK/MoltenVK/MoltenVK.xcframework/ios-arm64/libMoltenVK.a"
+            echo "  Found iOS device MoltenVK: $MOLTENVK_IOS_LIB"
+        fi
+        if [ -f "$VULKAN_SDK/MoltenVK/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a" ]; then
+            MOLTENVK_IOS_SIM_LIB="$VULKAN_SDK/MoltenVK/MoltenVK.xcframework/ios-arm64_x86_64-simulator/libMoltenVK.a"
+            echo "  Found iOS simulator MoltenVK: $MOLTENVK_IOS_SIM_LIB"
+        fi
+    fi
+
+    # iOS MoltenVK is typically linked statically at build time by ExecuTorch
+    # The Vulkan backend compiles MoltenVK into the static library
+    return 0
 }
 
 # All iOS variants: combinations of coreml and vulkan

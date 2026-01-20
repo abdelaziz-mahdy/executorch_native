@@ -167,6 +167,14 @@ if(EXECUTORCH_BUILD_MODE STREQUAL "prebuilt")
         FILES_MATCHING PATTERN "*.h"
     )
 
+    # Install MoltenVK ICD files if present (for macOS Vulkan variants)
+    if(EXISTS "${EXECUTORCH_INSTALL_DIR}/share/vulkan/icd.d")
+        install(DIRECTORY ${EXECUTORCH_INSTALL_DIR}/share/
+            DESTINATION share
+        )
+        message(STATUS "Installing MoltenVK ICD files")
+    endif()
+
     message(STATUS "============================================================")
     return()  # Skip the rest of CMakeLists.txt for prebuilt mode
 endif()

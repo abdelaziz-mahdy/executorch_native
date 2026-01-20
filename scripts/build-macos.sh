@@ -6,6 +6,7 @@
 # - x86_64: coreml combinations, plus Vulkan variants if MoltenVK available
 #
 # Vulkan on macOS uses MoltenVK (Vulkan-to-Metal translation layer)
+# MoltenVK is bundled with Vulkan variants for runtime use.
 #
 # Usage: ./build-macos.sh [VERSION]
 # Example: ./build-macos.sh 1.0.1
@@ -18,6 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
+# MoltenVK paths (set by find_moltenvk after brew install)
+MOLTENVK_LIB=""
+MOLTENVK_ICD=""
+
 # Check for Vulkan SDK / glslc availability (via MoltenVK on macOS)
 check_vulkan() {
     if command -v glslc &> /dev/null; then
@@ -27,6 +32,86 @@ check_vulkan() {
         return 0
     fi
     return 1
+}
+
+# Find MoltenVK library and ICD JSON from Homebrew installation
+find_moltenvk() {
+    local brew_prefix
+    brew_prefix=$(brew --prefix 2>/dev/null || echo "/opt/homebrew")
+
+    # Look for libMoltenVK.dylib
+    if [ -f "${brew_prefix}/lib/libMoltenVK.dylib" ]; then
+        MOLTENVK_LIB="${brew_prefix}/lib/libMoltenVK.dylib"
+    elif [ -f "/usr/local/lib/libMoltenVK.dylib" ]; then
+        MOLTENVK_LIB="/usr/local/lib/libMoltenVK.dylib"
+    fi
+
+    # Look for MoltenVK_icd.json (can be in share/ or etc/ depending on version)
+    if [ -f "${brew_prefix}/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
+        MOLTENVK_ICD="${brew_prefix}/share/vulkan/icd.d/MoltenVK_icd.json"
+    elif [ -f "${brew_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json" ]; then
+        MOLTENVK_ICD="${brew_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json"
+    elif [ -f "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
+        MOLTENVK_ICD="/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
+    elif [ -f "/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json" ]; then
+        MOLTENVK_ICD="/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json"
+    fi
+
+    if [ -n "$MOLTENVK_LIB" ] && [ -n "$MOLTENVK_ICD" ]; then
+        echo "  Found MoltenVK library: $MOLTENVK_LIB"
+        echo "  Found MoltenVK ICD: $MOLTENVK_ICD"
+        return 0
+    fi
+    return 1
+}
+
+# Bundle MoltenVK files into the install directory for Vulkan variants
+bundle_moltenvk() {
+    local install_dir=$1
+
+    if [ -z "$MOLTENVK_LIB" ] || [ -z "$MOLTENVK_ICD" ]; then
+        echo "  WARNING: MoltenVK not found, skipping bundle"
+        return 1
+    fi
+
+    echo "  Bundling MoltenVK runtime files..."
+
+    # Create directories
+    mkdir -p "${install_dir}/lib"
+    mkdir -p "${install_dir}/share/vulkan/icd.d"
+
+    # Copy libMoltenVK.dylib
+    cp "$MOLTENVK_LIB" "${install_dir}/lib/"
+    echo "    Copied libMoltenVK.dylib"
+
+    # Fix MoltenVK install name to use @rpath for relocatability
+    local moltenvk_dest="${install_dir}/lib/libMoltenVK.dylib"
+    install_name_tool -id "@rpath/libMoltenVK.dylib" "$moltenvk_dest" 2>/dev/null || true
+    echo "    Fixed MoltenVK install name to @rpath"
+
+    # Add @loader_path to rpath of executorch_ffi library so it finds MoltenVK
+    # The FFI library should be able to find MoltenVK in the same directory
+    local ffi_lib="${install_dir}/lib/libexecutorch_ffi.dylib"
+    if [ -f "$ffi_lib" ]; then
+        # Add @loader_path to rpath (where the loader itself is located)
+        install_name_tool -add_rpath "@loader_path" "$ffi_lib" 2>/dev/null || true
+        echo "    Added @loader_path to FFI library rpath"
+    fi
+
+    # Create modified ICD JSON with relative path
+    # The JSON points the loader to the library location
+    cat > "${install_dir}/share/vulkan/icd.d/MoltenVK_icd.json" << 'ICDJSON'
+{
+    "file_format_version" : "1.0.0",
+    "ICD": {
+        "library_path": "../../../lib/libMoltenVK.dylib",
+        "api_version" : "1.2.0"
+    }
+}
+ICDJSON
+    echo "    Created MoltenVK_icd.json with relative path"
+
+    return 0
 }
 
 # arm64: combinations of coreml/mps/vulkan
@@ -68,6 +153,15 @@ install_dependencies() {
 
   # Install Python dependencies
   pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+  # Find MoltenVK installation (installed via Homebrew in CI)
+  echo "Looking for MoltenVK..."
+  if find_moltenvk; then
+    echo "MoltenVK found - will be bundled with Vulkan variants"
+  else
+    echo "WARNING: MoltenVK not found - Vulkan variants will not include runtime"
+    echo "         Install with: brew install molten-vk"
+  fi
 
   echo "Dependencies installed successfully"
 }
@@ -119,6 +213,11 @@ build_variant() {
 
   # Install
   cmake --install "$build_dir" --config "${build_type}"
+
+  # Bundle MoltenVK for Vulkan variants
+  if [ "$vulkan" = "ON" ]; then
+    bundle_moltenvk "${build_dir}/install"
+  fi
 
   # Package
   echo "Packaging ${artifact_name}..."
