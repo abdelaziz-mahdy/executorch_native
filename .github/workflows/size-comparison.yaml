@@ -1,6 +1,10 @@
 name: Size Comparison Report
 
 on:
+  # Auto-trigger on new releases
+  release:
+    types: [published]
+
   # Auto-trigger when script or workflow changes - analyze latest release
   push:
     branches:
@@ -45,9 +49,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            # Manual trigger with specific tag
             TAG="${{ github.event.inputs.release_tag }}"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            # Triggered by release event
+            TAG="${{ github.event.release.tag_name }}"
           else
-            # Get latest release tag
+            # Push trigger - get latest release tag
             TAG=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name' 2>/dev/null || echo "")
             if [ -z "$TAG" ]; then
               echo "No releases found. Skipping."
