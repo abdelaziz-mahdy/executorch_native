@@ -7,16 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'ExecuTorch version (e.g., 1.0.1)'
+        description: 'ExecuTorch version (e.g., 1.1.0)'
         required: true
-        default: '1.0.1'
+        default: '1.1.0'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  EXECUTORCH_VERSION: ${{ github.event.inputs.version || '1.0.1' }}
 
 jobs:
   build:
@@ -26,6 +23,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Determine ExecuTorch version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.version }}" -ne "") {
+            # workflow_dispatch - use input
+            echo "version=${{ github.event.inputs.version }}" >> $env:GITHUB_OUTPUT
+          } else {
+            # tag push - extract from tag (v1.1.0.1 → 1.1.0)
+            $tag = "${{ github.ref_name }}"
+            $version = $tag -replace '^v', '' -replace '\.\d+$', ''
+            echo "version=$version" >> $env:GITHUB_OUTPUT
+          }
+          Write-Host "Determined ExecuTorch version: $version"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -88,7 +100,7 @@ jobs:
       - name: Run build script
         shell: pwsh
         run: |
-          .\scripts\build-windows.ps1 -Version "${{ env.EXECUTORCH_VERSION }}"
+          .\scripts\build-windows.ps1 -Version "${{ steps.version.outputs.version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
