@@ -32,7 +32,7 @@ using namespace executorch::runtime;
  * ============================================================================ */
 
 #define EXECUTORCH_FFI_VERSION "2.0.0"
-#define EXECUTORCH_VERSION "1.0.1"
+#define EXECUTORCH_VERSION "1.1.0"
 
 /* ============================================================================
  * Debug Logging
@@ -372,18 +372,28 @@ ET_API ETStatus* et_module_load(
     ET_LOG("et_module_load: loading program");
     auto load_error = module->module->load();
     if (load_error != Error::Ok) {
-        ET_LOG("et_module_load: ERROR - failed to load ExecuTorch program");
+        int error_code = static_cast<int>(load_error);
+        ET_LOG("et_module_load: ERROR - failed to load ExecuTorch program, error code: %d", error_code);
         delete module;
-        return create_status(ET_MODEL_LOAD_FAILED, "failed to load ExecuTorch program", __func__);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "failed to load ExecuTorch program (error code: %d)", error_code);
+        return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
     }
 
-    // Load the forward method
-    ET_LOG("et_module_load: loading forward method");
+    // Load the forward method (this initializes backend delegates like CoreML, MPS)
+    ET_LOG("et_module_load: loading forward method (initializing backend delegates)");
+    ET_LOG("et_module_load: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
+           ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
     auto forward_error = module->module->load_forward();
     if (forward_error != Error::Ok) {
-        ET_LOG("et_module_load: ERROR - failed to load forward method");
+        int error_code = static_cast<int>(forward_error);
+        ET_LOG("et_module_load: ERROR - failed to load forward method, error code: %d", error_code);
+        ET_LOG("et_module_load: This may indicate a backend delegate initialization failure");
+        ET_LOG("et_module_load: Common causes: CoreML delegate not compiled in, model exported for different backend");
         delete module;
-        return create_status(ET_MODEL_LOAD_FAILED, "failed to load forward method", __func__);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "failed to load forward method (error code: %d) - check backend compatibility", error_code);
+        return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
     }
 
     // Get method metadata
@@ -440,20 +450,29 @@ ET_API ETStatus* et_module_load_file(
     ET_LOG("et_module_load_file: loading program");
     auto load_error = module->module->load();
     if (load_error != Error::Ok) {
-        ET_LOG("et_module_load_file: ERROR - failed to load program from: %s", path);
+        int error_code = static_cast<int>(load_error);
+        ET_LOG("et_module_load_file: ERROR - failed to load program from: %s, error code: %d", path, error_code);
         delete module;
         char msg[512];
-        snprintf(msg, sizeof(msg), "failed to load program from: %s", path);
+        snprintf(msg, sizeof(msg), "failed to load program from: %s (error code: %d)", path, error_code);
         return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
     }
 
-    // Load the forward method
-    ET_LOG("et_module_load_file: loading forward method");
+    // Load the forward method (this initializes backend delegates like CoreML, MPS)
+    ET_LOG("et_module_load_file: loading forward method (initializing backend delegates)");
+    ET_LOG("et_module_load_file: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
+           ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
     auto forward_error = module->module->load_forward();
     if (forward_error != Error::Ok) {
-        ET_LOG("et_module_load_file: ERROR - failed to load forward method");
+        int error_code = static_cast<int>(forward_error);
+        ET_LOG("et_module_load_file: ERROR - failed to load forward method, error code: %d", error_code);
+        ET_LOG("et_module_load_file: Model path: %s", path);
+        ET_LOG("et_module_load_file: This may indicate a backend delegate initialization failure");
+        ET_LOG("et_module_load_file: Common causes: CoreML delegate not compiled in, model exported for different backend");
         delete module;
-        return create_status(ET_MODEL_LOAD_FAILED, "failed to load forward method", __func__);
+        char msg[512];
+        snprintf(msg, sizeof(msg), "failed to load forward method for %s (error code: %d) - check backend compatibility", path, error_code);
+        return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
     }
 
     // Get method metadata
