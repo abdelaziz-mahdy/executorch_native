@@ -437,12 +437,12 @@ if(ET_BUILD_XNNPACK AND TARGET xnnpack_backend)
     list(APPEND EXECUTORCH_LIBRARIES xnnpack_backend)
 endif()
 
-if(ET_BUILD_COREML AND TARGET coreml_backend)
-    list(APPEND EXECUTORCH_LIBRARIES coreml_backend)
+if(ET_BUILD_COREML AND TARGET coremldelegate)
+    list(APPEND EXECUTORCH_LIBRARIES coremldelegate)
 endif()
 
-if(ET_BUILD_MPS AND TARGET mps_backend)
-    list(APPEND EXECUTORCH_LIBRARIES mps_backend)
+if(ET_BUILD_MPS AND TARGET mpsdelegate)
+    list(APPEND EXECUTORCH_LIBRARIES mpsdelegate)
 endif()
 
 if(ET_BUILD_VULKAN AND TARGET vulkan_backend)

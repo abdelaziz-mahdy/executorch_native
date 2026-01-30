@@ -216,6 +216,22 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
 
+# Apple delegate backends require whole-archive linking to ensure static initializers run
+# The CoreML and MPS delegates use static initialization to register themselves with
+# the backend registry. Without -force_load, the linker may strip the anonymous namespace
+# containing the static initializer that calls register_backend().
+# Reference: https://pytorch.org/executorch/main/backends-coreml.html
+if(APPLE AND EXECUTORCH_BUILD_MODE STREQUAL "source")
+    if(ET_BUILD_COREML AND TARGET coremldelegate)
+        target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" coremldelegate)
+        message(STATUS "CoreML backend: linked with -force_load for static registration")
+    endif()
+    if(ET_BUILD_MPS AND TARGET mpsdelegate)
+        target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" mpsdelegate)
+        message(STATUS "MPS backend: linked with -force_load for static registration")
+    endif()
+endif()
+
 # Backend compile definitions
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     ET_BUILD_XNNPACK=$<BOOL:${ET_BUILD_XNNPACK}>
