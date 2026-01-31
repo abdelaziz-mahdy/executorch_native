@@ -1,9 +1,20 @@
 name: Build Linux
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Called by release workflow
+  workflow_call:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.1.0)'
+        required: true
+        type: string
+      upload_release:
+        description: 'Upload to GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+  # Manual trigger for testing
   workflow_dispatch:
     inputs:
       version:
@@ -12,7 +23,7 @@ on:
         default: '1.1.0'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-linux-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,21 +34,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Determine ExecuTorch version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            # workflow_dispatch - use input
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            # tag push - extract from tag (v1.1.0.1 → 1.1.0)
-            TAG="${{ github.ref_name }}"
-            VERSION="${TAG#v}"      # Remove 'v' prefix: 1.1.0.1
-            VERSION="${VERSION%.*}" # Remove build number: 1.1.0
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          fi
-          echo "Determined ExecuTorch version: $(cat $GITHUB_OUTPUT | grep version | cut -d= -f2)"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -73,7 +69,7 @@ jobs:
       - name: Run build script
         run: |
           chmod +x scripts/build-linux.sh
-          ./scripts/build-linux.sh "${{ steps.version.outputs.version }}"
+          ./scripts/build-linux.sh "${{ inputs.version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -89,21 +85,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Determine ExecuTorch version
-        id: version
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            # workflow_dispatch - use input
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            # tag push - extract from tag (v1.1.0.1 → 1.1.0)
-            TAG="${{ github.ref_name }}"
-            VERSION="${TAG#v}"      # Remove 'v' prefix: 1.1.0.1
-            VERSION="${VERSION%.*}" # Remove build number: 1.1.0
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          fi
-          echo "Determined ExecuTorch version: $(cat $GITHUB_OUTPUT | grep version | cut -d= -f2)"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -140,7 +121,7 @@ jobs:
       - name: Run build script
         run: |
           chmod +x scripts/build-linux.sh
-          ./scripts/build-linux.sh "${{ steps.version.outputs.version }}"
+          ./scripts/build-linux.sh "${{ inputs.version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -152,7 +133,7 @@ jobs:
   release:
     needs: [build-x64, build-arm64]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: inputs.upload_release
     permissions:
       contents: write
 

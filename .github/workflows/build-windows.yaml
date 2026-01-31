@@ -1,9 +1,20 @@
 name: Build Windows
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Called by release workflow
+  workflow_call:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.1.0)'
+        required: true
+        type: string
+      upload_release:
+        description: 'Upload to GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+  # Manual trigger for testing
   workflow_dispatch:
     inputs:
       version:
@@ -12,7 +23,7 @@ on:
         default: '1.1.0'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,21 +34,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Determine ExecuTorch version
-        id: version
-        shell: pwsh
-        run: |
-          if ("${{ github.event.inputs.version }}" -ne "") {
-            # workflow_dispatch - use input
-            echo "version=${{ github.event.inputs.version }}" >> $env:GITHUB_OUTPUT
-          } else {
-            # tag push - extract from tag (v1.1.0.1 → 1.1.0)
-            $tag = "${{ github.ref_name }}"
-            $version = $tag -replace '^v', '' -replace '\.\d+$', ''
-            echo "version=$version" >> $env:GITHUB_OUTPUT
-          }
-          Write-Host "Determined ExecuTorch version: $version"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -100,7 +96,7 @@ jobs:
       - name: Run build script
         shell: pwsh
         run: |
-          .\scripts\build-windows.ps1 -Version "${{ steps.version.outputs.version }}"
+          .\scripts\build-windows.ps1 -Version "${{ inputs.version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -112,7 +108,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: inputs.upload_release
     permissions:
       contents: write
 

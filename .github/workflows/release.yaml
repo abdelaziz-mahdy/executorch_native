@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'ExecuTorch version (e.g., 1.1.0)'
+        required: true
+        default: '1.1.0'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # Determine version from tag or input
+  # ============================================================================
+  get-version:
+    name: Get Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            # workflow_dispatch - use input
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="${{ github.ref_name }}"
+          else
+            # tag push - extract from tag (v1.1.0.1 → 1.1.0)
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"      # Remove 'v' prefix: 1.1.0.1
+            VERSION="${VERSION%.*}" # Remove build number: 1.1.0
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "ExecuTorch version: $VERSION"
+          echo "Release tag: $TAG"
+
+  # ============================================================================
+  # Build all platforms in parallel
+  # ============================================================================
+  build-android:
+    name: Build Android
+    needs: get-version
+    uses: ./.github/workflows/build-android.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
+
+  build-apple:
+    name: Build Apple
+    needs: get-version
+    uses: ./.github/workflows/build-apple.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
+
+  build-linux:
+    name: Build Linux
+    needs: get-version
+    uses: ./.github/workflows/build-linux.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
+
+  build-windows:
+    name: Build Windows
+    needs: get-version
+    uses: ./.github/workflows/build-windows.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
+
+  # ============================================================================
+  # Create GitHub Release after ALL builds complete
+  # ============================================================================
+  create-release:
+    name: Create Release
+    needs: [get-version, build-android, build-apple, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f | head -50
+
+      - name: Collect files and generate hashes
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz" -exec cp {} release/ \; 2>/dev/null || true
+          find artifacts -name "*.zip" -exec cp {} release/ \; 2>/dev/null || true
+          cd release
+          # Generate SHA256 hash files for each artifact
+          for f in *; do
+            [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
+          done
+          echo "Release files:"
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.get-version.outputs.tag }}
+          name: ${{ needs.get-version.outputs.tag }}
+          body: |
+            ## ExecuTorch Native Libraries ${{ needs.get-version.outputs.tag }}
+
+            Pre-built native libraries for ExecuTorch ${{ needs.get-version.outputs.version }}.
+
+            ### Platforms
+            - ✅ Android (arm64-v8a, armeabi-v7a, x86_64, x86)
+            - ✅ iOS (arm64, simulator arm64/x86_64)
+            - ✅ macOS (arm64, x86_64)
+            - ✅ Linux (x64, arm64)
+            - ✅ Windows (x64)
+
+            ### Backend Variants
+            - `xnnpack` - CPU-optimized (all platforms)
+            - `xnnpack-coreml` - CPU + Apple Neural Engine (iOS/macOS)
+            - `xnnpack-mps` - CPU + Metal GPU (macOS)
+            - `xnnpack-vulkan` - CPU + Vulkan GPU (all platforms)
+
+            ### Size Reports
+            Size comparison charts will be added automatically after this release is created.
+          generate_release_notes: true
+          files: |
+            release/*
+
+  # ============================================================================
+  # Generate size comparison report AFTER release is created
+  # ============================================================================
+  size-report:
+    name: Generate Size Report
+    needs: [get-version, create-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pygal lxml
+
+      - name: Analyze artifact sizes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.get-version.outputs.tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/analyze-sizes.py
+
+      - name: Upload size report to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.get-version.outputs.tag }}"
+          echo "Uploading size reports to release: $TAG"
+          gh release upload "$TAG" size-report-release.svg size-report-debug.svg size-report.json --clobber
+
+      - name: Upload size report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-report
+          path: |
+            size-report-release.svg
+            size-report-debug.svg
+            size-report.json
+          retention-days: 90
+
+      - name: Generate summary
+        run: |
+          TAG="${{ needs.get-version.outputs.tag }}"
+          echo "## Size Comparison Report ($TAG)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Release Builds" >> $GITHUB_STEP_SUMMARY
+          echo "![Release](https://github.com/${{ github.repository }}/releases/download/$TAG/size-report-release.svg)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Debug Builds" >> $GITHUB_STEP_SUMMARY
+          echo "![Debug](https://github.com/${{ github.repository }}/releases/download/$TAG/size-report-debug.svg)" >> $GITHUB_STEP_SUMMARY
