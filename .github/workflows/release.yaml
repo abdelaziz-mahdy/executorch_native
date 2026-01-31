@@ -15,6 +15,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# Grant permissions to all jobs (inherited by workflow_call)
+permissions:
+  contents: write
+
 jobs:
   # ============================================================================
   # Determine version from tag or input
@@ -54,6 +58,7 @@ jobs:
     with:
       version: ${{ needs.get-version.outputs.version }}
       upload_release: false
+    secrets: inherit
 
   build-apple:
     name: Build Apple
@@ -62,6 +67,7 @@ jobs:
     with:
       version: ${{ needs.get-version.outputs.version }}
       upload_release: false
+    secrets: inherit
 
   build-linux:
     name: Build Linux
@@ -70,6 +76,7 @@ jobs:
     with:
       version: ${{ needs.get-version.outputs.version }}
       upload_release: false
+    secrets: inherit
 
   build-windows:
     name: Build Windows
@@ -78,6 +85,7 @@ jobs:
     with:
       version: ${{ needs.get-version.outputs.version }}
       upload_release: false
+    secrets: inherit
 
   # ============================================================================
   # Create GitHub Release after ALL builds complete

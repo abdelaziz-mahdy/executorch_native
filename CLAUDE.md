@@ -17,6 +17,18 @@ This project uses a 4-part version: `X.Y.Z.W`
 
 Example: `v1.0.1.6` = ExecuTorch 1.0.1, sixth build iteration.
 
+## Quick Start
+
+```bash
+# Build locally (from native/ directory)
+mkdir -p build && cd build
+cmake .. -DEXECUTORCH_BUILD_MODE=prebuilt
+cmake --build . --config Release
+
+# Clean build
+rm -rf build && mkdir build && cd build && cmake .. && cmake --build .
+```
+
 ## Project Structure
 
 ```
@@ -202,5 +214,4 @@ After releasing a new native version:
 
 ---
 
-**Last Updated**: 2026-01-17
 **Current Version**: See `EXECUTORCH_PREBUILT_VERSION` in CMakeLists.txt
