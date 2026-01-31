@@ -1,6 +1,17 @@
 # CI/CD Workflows
 
-This directory contains GitHub Actions workflows for building and releasing ExecuTorch native libraries.
+GitHub Actions workflows for building and releasing ExecuTorch native libraries.
+
+---
+
+## Table of Contents
+
+- [Architecture](#workflow-architecture)
+- [Workflows](#workflows)
+- [Standalone vs Orchestrated](#standalone-vs-orchestrated-builds)
+- [FAQ](#faq)
+
+---
 
 ## Workflow Architecture
 
