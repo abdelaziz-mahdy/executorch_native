@@ -73,6 +73,24 @@ Controls the build process. Important options:
 
 ## CI/CD Pipeline
 
+> **Detailed Documentation:** See [`.github/workflows/README.md`](.github/workflows/README.md) for comprehensive CI/CD documentation.
+
+### Architecture Overview
+
+The CI/CD uses a **unified release orchestrator** pattern:
+
+```
+release.yaml (orchestrator)
+    ├── build-android.yaml (upload_release: false)
+    ├── build-apple.yaml   (upload_release: false)
+    ├── build-linux.yaml   (upload_release: false)
+    ├── build-windows.yaml (upload_release: false)
+    ├── create-release     (waits for all builds, creates unified release)
+    └── size-report        (generates SVG charts)
+```
+
+**Key Design:** Individual build workflows have their own `release` jobs for standalone use. When orchestrated by `release.yaml`, these are **intentionally skipped** (`upload_release: false`) so that ONE unified release is created with all platform artifacts.
+
 ### Automated Builds (GitHub Actions)
 
 When a tag is pushed (e.g., `v1.0.1.7`), CI automatically builds:
