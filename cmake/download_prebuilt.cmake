@@ -138,6 +138,37 @@ else()
     # Download expected hash first (for cache busting)
     download_hash_file("${_hash_url}" _expected_hash)
 
+    # If hash file doesn't exist, the prebuilt binary doesn't exist either
+    # Fail early with a clear error message
+    if("${_expected_hash}" STREQUAL "")
+        message(FATAL_ERROR
+            "============================================================\n"
+            "ERROR: Pre-built binary not available for this platform.\n"
+            "============================================================\n"
+            "\n"
+            "Could not find pre-built binary:\n"
+            "  ${_filename}\n"
+            "\n"
+            "Platform: ${EXECUTORCH_PLATFORM}\n"
+            "Architecture: ${EXECUTORCH_ARCH}\n"
+            "Variant: ${EXECUTORCH_VARIANT}\n"
+            "Build Type: ${_build_type_lower}\n"
+            "Version: v${EXECUTORCH_PREBUILT_VERSION}\n"
+            "\n"
+            "Options:\n"
+            "  1. Check available prebuilts at:\n"
+            "     https://github.com/${EXECUTORCH_PREBUILT_REPO}/releases/tag/v${EXECUTORCH_PREBUILT_VERSION}\n"
+            "\n"
+            "  2. Build from source (slower, requires ExecuTorch setup):\n"
+            "     In pubspec.yaml:\n"
+            "       hooks:\n"
+            "         user_defines:\n"
+            "           executorch_flutter:\n"
+            "             build_mode: \"source\"\n"
+            "============================================================\n"
+        )
+    endif()
+
     # Check if we have a valid cached version
     set(_hash_cache_file "${_cache_dir}/.cached_hash")
     set(_needs_download TRUE)
@@ -173,24 +204,13 @@ else()
         # Use FetchContent to download and extract
         include(FetchContent)
 
-        # If we have an expected hash, use it for verification
-        if(NOT "${_expected_hash}" STREQUAL "")
-            FetchContent_Declare(
-                libexecutorch_prebuilt
-                URL ${_url}
-                URL_HASH SHA256=${_expected_hash}
-                DOWNLOAD_NO_EXTRACT FALSE
-            )
-        else()
-            # No hash available, download without verification (with warning)
-            message(WARNING
-                "No hash file available - downloading without verification")
-            FetchContent_Declare(
-                libexecutorch_prebuilt
-                URL ${_url}
-                DOWNLOAD_NO_EXTRACT FALSE
-            )
-        endif()
+        # Download with hash verification (we already validated hash exists above)
+        FetchContent_Declare(
+            libexecutorch_prebuilt
+            URL ${_url}
+            URL_HASH SHA256=${_expected_hash}
+            DOWNLOAD_NO_EXTRACT FALSE
+        )
 
         # Make available - this will download and extract
         FetchContent_MakeAvailable(libexecutorch_prebuilt)
