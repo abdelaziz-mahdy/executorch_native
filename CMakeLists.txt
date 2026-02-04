@@ -226,55 +226,62 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${EXECUTORCH_INCLUDE_DIRS}
 )
 
-# Link against ExecuTorch
-target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
-target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
-
 # Backend delegates require whole-archive linking to ensure static initializers run.
 # All backends use static initialization to register themselves with the backend registry
 # via register_backend(). Without whole-archive linking, the linker may strip the anonymous
 # namespace containing the static initializer.
 # Reference: https://pytorch.org/executorch/main/backends-coreml.html
 # Reference: upstream backends/vulkan/CMakeLists.txt uses executorch_target_link_options_shared_lib()
+#
+# IMPORTANT: Backends linked with whole-archive must be removed from EXECUTORCH_LIBRARIES
+# first, otherwise they get linked twice causing "multiple definition" errors on GNU ld.
+# Apple's linker handles duplicates gracefully, but we remove for all platforms for consistency.
+set(_whole_archive_libs "")
 if(EXECUTORCH_BUILD_MODE STREQUAL "source")
     if(APPLE)
         if(ET_BUILD_COREML AND TARGET coremldelegate)
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" coremldelegate)
-            message(STATUS "CoreML backend: linked with -force_load for static registration")
+            list(APPEND _whole_archive_libs coremldelegate)
         endif()
         if(ET_BUILD_MPS AND TARGET mpsdelegate)
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" mpsdelegate)
-            message(STATUS "MPS backend: linked with -force_load for static registration")
+            list(APPEND _whole_archive_libs mpsdelegate)
         endif()
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" vulkan_backend)
-            message(STATUS "Vulkan backend: linked with -force_load for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" qnn_backend)
-            message(STATUS "QNN backend: linked with -force_load for static registration")
-        endif()
+    endif()
+    if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
+        list(APPEND _whole_archive_libs vulkan_backend)
+    endif()
+    if(ET_BUILD_QNN AND TARGET qnn_backend)
+        list(APPEND _whole_archive_libs qnn_backend)
+    endif()
+
+    # Remove whole-archive backends from regular library list
+    foreach(_lib ${_whole_archive_libs})
+        list(REMOVE_ITEM EXECUTORCH_LIBRARIES ${_lib})
+    endforeach()
+endif()
+
+# Link against ExecuTorch (without whole-archive backends)
+target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
+
+# Now link whole-archive backends with appropriate platform flags
+if(EXECUTORCH_BUILD_MODE STREQUAL "source")
+    if(APPLE)
+        foreach(_lib ${_whole_archive_libs})
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" ${_lib})
+            message(STATUS "${_lib}: linked with -force_load for static registration")
+        endforeach()
     elseif(MSVC)
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:vulkan_backend>")
-            message(STATUS "Vulkan backend: linked with /WHOLEARCHIVE for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:qnn_backend>")
-            message(STATUS "QNN backend: linked with /WHOLEARCHIVE for static registration")
-        endif()
+        foreach(_lib ${_whole_archive_libs})
+            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:${_lib}>")
+            message(STATUS "${_lib}: linked with /WHOLEARCHIVE for static registration")
+        endforeach()
     else()
         # Linux / Android - use --whole-archive / --no-whole-archive
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
+        foreach(_lib ${_whole_archive_libs})
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                "-Wl,--whole-archive" vulkan_backend "-Wl,--no-whole-archive")
-            message(STATUS "Vulkan backend: linked with --whole-archive for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_libraries(${PROJECT_NAME} PRIVATE
-                "-Wl,--whole-archive" qnn_backend "-Wl,--no-whole-archive")
-            message(STATUS "QNN backend: linked with --whole-archive for static registration")
-        endif()
+                "-Wl,--whole-archive" ${_lib} "-Wl,--no-whole-archive")
+            message(STATUS "${_lib}: linked with --whole-archive for static registration")
+        endforeach()
     endif()
 endif()
 
