@@ -226,64 +226,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${EXECUTORCH_INCLUDE_DIRS}
 )
 
-# Backend delegates require whole-archive linking to ensure static initializers run.
-# All backends use static initialization to register themselves with the backend registry
-# via register_backend(). Without whole-archive linking, the linker may strip the anonymous
-# namespace containing the static initializer.
-# Reference: https://pytorch.org/executorch/main/backends-coreml.html
-# Reference: upstream backends/vulkan/CMakeLists.txt uses executorch_target_link_options_shared_lib()
-#
-# We use target_link_options with $<TARGET_FILE:> generator expressions instead of
-# target_link_libraries to avoid CMake adding the library as both a whole-archive
-# argument AND a regular dependency (which causes duplicate symbol errors).
-
 # Link against ExecuTorch
 target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
 
-# Add whole-archive / force_load linking for backend static registration
-if(EXECUTORCH_BUILD_MODE STREQUAL "source")
-    if(APPLE)
-        if(ET_BUILD_COREML AND TARGET coremldelegate)
-            target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-force_load,$<TARGET_FILE:coremldelegate>")
-            message(STATUS "CoreML backend: linked with -force_load for static registration")
-        endif()
-        if(ET_BUILD_MPS AND TARGET mpsdelegate)
-            target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-force_load,$<TARGET_FILE:mpsdelegate>")
-            message(STATUS "MPS backend: linked with -force_load for static registration")
-        endif()
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-force_load,$<TARGET_FILE:vulkan_backend>")
-            message(STATUS "Vulkan backend: linked with -force_load for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-force_load,$<TARGET_FILE:qnn_backend>")
-            message(STATUS "QNN backend: linked with -force_load for static registration")
-        endif()
-    elseif(MSVC)
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:vulkan_backend>")
-            message(STATUS "Vulkan backend: linked with /WHOLEARCHIVE for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:qnn_backend>")
-            message(STATUS "QNN backend: linked with /WHOLEARCHIVE for static registration")
-        endif()
-    else()
-        # Linux / Android - use target_link_options to pass --whole-archive as raw
-        # linker flags with $<TARGET_FILE:> to avoid CMake target dependency duplication
-        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE
-                "LINKER:--whole-archive,$<TARGET_FILE:vulkan_backend>,--no-whole-archive")
-            message(STATUS "Vulkan backend: linked with --whole-archive for static registration")
-        endif()
-        if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_options(${PROJECT_NAME} PRIVATE
-                "LINKER:--whole-archive,$<TARGET_FILE:qnn_backend>,--no-whole-archive")
-            message(STATUS "QNN backend: linked with --whole-archive for static registration")
-        endif()
-    endif()
-endif()
+# Note: Backend delegates (CoreML, MPS, Vulkan, QNN) require whole-archive linking
+# to ensure static initializers for register_backend() are not stripped by the linker.
+# This is handled AUTOMATICALLY by upstream ExecuTorch - each backend target calls
+# executorch_target_link_options_shared_lib() in its own CMakeLists.txt, which adds
+# INTERFACE link options (--whole-archive / -force_load / /WHOLEARCHIVE) to the target.
+# When we link against these targets via target_link_libraries above, the whole-archive
+# flags are inherited automatically. No manual whole-archive handling needed here.
 
 # Backend compile definitions
 target_compile_definitions(${PROJECT_NAME} PRIVATE
