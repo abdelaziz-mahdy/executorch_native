@@ -233,21 +233,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # Reference: https://pytorch.org/executorch/main/backends-coreml.html
 # Reference: upstream backends/vulkan/CMakeLists.txt uses executorch_target_link_options_shared_lib()
 #
-# Platform-specific linking strategies:
-# - Apple (ld64): Backends stay in EXECUTORCH_LIBRARIES and get an additional -force_load.
-#   Apple's linker deduplicates gracefully when a library is linked normally + force_loaded.
-# - GNU ld (Linux/Android): Backends MUST be removed from EXECUTORCH_LIBRARIES before
-#   linking with --whole-archive, otherwise "multiple definition" errors occur.
-# - MSVC (Windows): Same as GNU ld - remove first, then /WHOLEARCHIVE.
-if(EXECUTORCH_BUILD_MODE STREQUAL "source" AND NOT APPLE)
-    # On non-Apple platforms, remove backends that need whole-archive from regular list
-    if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-        list(REMOVE_ITEM EXECUTORCH_LIBRARIES vulkan_backend)
-    endif()
-    if(ET_BUILD_QNN AND TARGET qnn_backend)
-        list(REMOVE_ITEM EXECUTORCH_LIBRARIES qnn_backend)
-    endif()
-endif()
+# We use target_link_options with $<TARGET_FILE:> generator expressions instead of
+# target_link_libraries to avoid CMake adding the library as both a whole-archive
+# argument AND a regular dependency (which causes duplicate symbol errors).
 
 # Link against ExecuTorch
 target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
@@ -256,8 +244,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
 # Add whole-archive / force_load linking for backend static registration
 if(EXECUTORCH_BUILD_MODE STREQUAL "source")
     if(APPLE)
-        # Apple ld64 handles duplicate linking gracefully - backends are already
-        # in EXECUTORCH_LIBRARIES, we add -force_load to ensure static initializers run
         if(ET_BUILD_COREML AND TARGET coremldelegate)
             target_link_options(${PROJECT_NAME} PRIVATE "LINKER:-force_load,$<TARGET_FILE:coremldelegate>")
             message(STATUS "CoreML backend: linked with -force_load for static registration")
@@ -284,15 +270,16 @@ if(EXECUTORCH_BUILD_MODE STREQUAL "source")
             message(STATUS "QNN backend: linked with /WHOLEARCHIVE for static registration")
         endif()
     else()
-        # Linux / Android - backends already removed from EXECUTORCH_LIBRARIES above
+        # Linux / Android - use target_link_options to pass --whole-archive as raw
+        # linker flags with $<TARGET_FILE:> to avoid CMake target dependency duplication
         if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
-            target_link_libraries(${PROJECT_NAME} PRIVATE
-                "-Wl,--whole-archive" vulkan_backend "-Wl,--no-whole-archive")
+            target_link_options(${PROJECT_NAME} PRIVATE
+                "LINKER:--whole-archive,$<TARGET_FILE:vulkan_backend>,--no-whole-archive")
             message(STATUS "Vulkan backend: linked with --whole-archive for static registration")
         endif()
         if(ET_BUILD_QNN AND TARGET qnn_backend)
-            target_link_libraries(${PROJECT_NAME} PRIVATE
-                "-Wl,--whole-archive" qnn_backend "-Wl,--no-whole-archive")
+            target_link_options(${PROJECT_NAME} PRIVATE
+                "LINKER:--whole-archive,$<TARGET_FILE:qnn_backend>,--no-whole-archive")
             message(STATUS "QNN backend: linked with --whole-archive for static registration")
         endif()
     endif()
