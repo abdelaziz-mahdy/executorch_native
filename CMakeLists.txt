@@ -257,6 +257,9 @@ if(APPLE)
         MACOSX_RPATH TRUE
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_NAME_DIR "@rpath"
+        # @loader_path allows dlopen() within this library to find sibling
+        # libraries (e.g., libMoltenVK.dylib for Vulkan on macOS)
+        INSTALL_RPATH "@loader_path"
     )
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
     set(CMAKE_C_VISIBILITY_PRESET hidden)
@@ -277,12 +280,20 @@ elseif(WIN32)
 elseif(ANDROID)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         LIBRARY_OUTPUT_NAME "executorch_ffi"
+        # $ORIGIN allows dlopen() within this library to find sibling
+        # shared libraries in the same directory
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "$ORIGIN"
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE log android)
 
 elseif(UNIX AND NOT APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         LIBRARY_OUTPUT_NAME "executorch_ffi"
+        # $ORIGIN allows dlopen() within this library to find sibling
+        # shared libraries in the same directory
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "$ORIGIN"
     )
     target_link_libraries(${PROJECT_NAME} PRIVATE pthread dl)
 endif()

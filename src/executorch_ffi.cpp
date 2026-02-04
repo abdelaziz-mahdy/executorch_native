@@ -353,67 +353,80 @@ ET_API ETStatus* et_module_load(
         return create_status(ET_OUT_OF_MEMORY, "failed to allocate module", __func__);
     }
 
-    // Copy model data to keep it alive for BufferDataLoader
-    ET_LOG("et_module_load: copying model data to internal buffer");
-    module->model_buffer.assign(data, data + data_size);
+    try {
+        // Copy model data to keep it alive for BufferDataLoader
+        ET_LOG("et_module_load: copying model data to internal buffer");
+        module->model_buffer.assign(data, data + data_size);
 
-    // Create BufferDataLoader
-    ET_LOG("et_module_load: creating BufferDataLoader");
-    auto data_loader = std::make_unique<BufferDataLoader>(
-        module->model_buffer.data(),
-        module->model_buffer.size()
-    );
+        // Create BufferDataLoader
+        ET_LOG("et_module_load: creating BufferDataLoader");
+        auto data_loader = std::make_unique<BufferDataLoader>(
+            module->model_buffer.data(),
+            module->model_buffer.size()
+        );
 
-    // Create Module with the data loader
-    ET_LOG("et_module_load: creating Module");
-    module->module = std::make_unique<Module>(std::move(data_loader));
+        // Create Module with the data loader
+        ET_LOG("et_module_load: creating Module");
+        module->module = std::make_unique<Module>(std::move(data_loader));
 
-    // Load the program
-    ET_LOG("et_module_load: loading program");
-    auto load_error = module->module->load();
-    if (load_error != Error::Ok) {
-        int error_code = static_cast<int>(load_error);
-        ET_LOG("et_module_load: ERROR - failed to load ExecuTorch program, error code: %d", error_code);
+        // Load the program
+        ET_LOG("et_module_load: loading program");
+        auto load_error = module->module->load();
+        if (load_error != Error::Ok) {
+            int error_code = static_cast<int>(load_error);
+            ET_LOG("et_module_load: ERROR - failed to load ExecuTorch program, error code: %d", error_code);
+            delete module;
+            char msg[256];
+            snprintf(msg, sizeof(msg), "failed to load ExecuTorch program (error code: %d)", error_code);
+            return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        }
+
+        // Load the forward method (this initializes backend delegates like CoreML, MPS)
+        ET_LOG("et_module_load: loading forward method (initializing backend delegates)");
+        ET_LOG("et_module_load: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
+               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
+        auto forward_error = module->module->load_forward();
+        if (forward_error != Error::Ok) {
+            int error_code = static_cast<int>(forward_error);
+            ET_LOG("et_module_load: ERROR - failed to load forward method, error code: %d", error_code);
+            ET_LOG("et_module_load: This may indicate a backend delegate initialization failure");
+            ET_LOG("et_module_load: Common causes: CoreML delegate not compiled in, model exported for different backend");
+            delete module;
+            char msg[256];
+            snprintf(msg, sizeof(msg), "failed to load forward method (error code: %d) - check backend compatibility", error_code);
+            return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        }
+
+        // Get method metadata
+        ET_LOG("et_module_load: getting method metadata");
+        auto method_meta_result = module->module->method_meta("forward");
+        if (method_meta_result.ok()) {
+            auto& meta = method_meta_result.get();
+            module->input_count = static_cast<int32_t>(meta.num_inputs());
+            module->output_count = static_cast<int32_t>(meta.num_outputs());
+            ET_LOG("et_module_load: inputs=%d, outputs=%d", module->input_count, module->output_count);
+        } else {
+            ET_LOG("et_module_load: WARNING - could not get method metadata, assuming 1 input/output");
+            module->input_count = 1;
+            module->output_count = 1;
+        }
+
+        module->loaded = true;
+        *out = module;
+        ET_LOG("et_module_load: SUCCESS - module loaded at %p", static_cast<void*>(module));
+        return create_ok_status();
+
+    } catch (const std::exception& e) {
+        ET_LOG("et_module_load: ERROR - C++ exception: %s", e.what());
         delete module;
-        char msg[256];
-        snprintf(msg, sizeof(msg), "failed to load ExecuTorch program (error code: %d)", error_code);
+        char msg[512];
+        snprintf(msg, sizeof(msg), "backend initialization failed: %s", e.what());
         return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
-    }
-
-    // Load the forward method (this initializes backend delegates like CoreML, MPS)
-    ET_LOG("et_module_load: loading forward method (initializing backend delegates)");
-    ET_LOG("et_module_load: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
-           ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
-    auto forward_error = module->module->load_forward();
-    if (forward_error != Error::Ok) {
-        int error_code = static_cast<int>(forward_error);
-        ET_LOG("et_module_load: ERROR - failed to load forward method, error code: %d", error_code);
-        ET_LOG("et_module_load: This may indicate a backend delegate initialization failure");
-        ET_LOG("et_module_load: Common causes: CoreML delegate not compiled in, model exported for different backend");
+    } catch (...) {
+        ET_LOG("et_module_load: ERROR - unknown C++ exception");
         delete module;
-        char msg[256];
-        snprintf(msg, sizeof(msg), "failed to load forward method (error code: %d) - check backend compatibility", error_code);
-        return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        return create_status(ET_MODEL_LOAD_FAILED, "unknown backend initialization error", __func__);
     }
-
-    // Get method metadata
-    ET_LOG("et_module_load: getting method metadata");
-    auto method_meta_result = module->module->method_meta("forward");
-    if (method_meta_result.ok()) {
-        auto& meta = method_meta_result.get();
-        module->input_count = static_cast<int32_t>(meta.num_inputs());
-        module->output_count = static_cast<int32_t>(meta.num_outputs());
-        ET_LOG("et_module_load: inputs=%d, outputs=%d", module->input_count, module->output_count);
-    } else {
-        ET_LOG("et_module_load: WARNING - could not get method metadata, assuming 1 input/output");
-        module->input_count = 1;
-        module->output_count = 1;
-    }
-
-    module->loaded = true;
-    *out = module;
-    ET_LOG("et_module_load: SUCCESS - module loaded at %p", static_cast<void*>(module));
-    return create_ok_status();
 }
 
 ET_API ETStatus* et_module_load_file(
@@ -439,60 +452,73 @@ ET_API ETStatus* et_module_load_file(
         return create_status(ET_OUT_OF_MEMORY, "failed to allocate module", __func__);
     }
 
-    // Create Module directly from file path
-    ET_LOG("et_module_load_file: creating Module with MmapUseMlockIgnoreErrors");
-    module->module = std::make_unique<Module>(
-        std::string(path),
-        Module::LoadMode::MmapUseMlockIgnoreErrors
-    );
+    try {
+        // Create Module directly from file path
+        ET_LOG("et_module_load_file: creating Module with MmapUseMlockIgnoreErrors");
+        module->module = std::make_unique<Module>(
+            std::string(path),
+            Module::LoadMode::MmapUseMlockIgnoreErrors
+        );
 
-    // Load the program
-    ET_LOG("et_module_load_file: loading program");
-    auto load_error = module->module->load();
-    if (load_error != Error::Ok) {
-        int error_code = static_cast<int>(load_error);
-        ET_LOG("et_module_load_file: ERROR - failed to load program from: %s, error code: %d", path, error_code);
+        // Load the program
+        ET_LOG("et_module_load_file: loading program");
+        auto load_error = module->module->load();
+        if (load_error != Error::Ok) {
+            int error_code = static_cast<int>(load_error);
+            ET_LOG("et_module_load_file: ERROR - failed to load program from: %s, error code: %d", path, error_code);
+            delete module;
+            char msg[512];
+            snprintf(msg, sizeof(msg), "failed to load program from: %s (error code: %d)", path, error_code);
+            return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        }
+
+        // Load the forward method (this initializes backend delegates like CoreML, MPS)
+        ET_LOG("et_module_load_file: loading forward method (initializing backend delegates)");
+        ET_LOG("et_module_load_file: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
+               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
+        auto forward_error = module->module->load_forward();
+        if (forward_error != Error::Ok) {
+            int error_code = static_cast<int>(forward_error);
+            ET_LOG("et_module_load_file: ERROR - failed to load forward method, error code: %d", error_code);
+            ET_LOG("et_module_load_file: Model path: %s", path);
+            ET_LOG("et_module_load_file: This may indicate a backend delegate initialization failure");
+            ET_LOG("et_module_load_file: Common causes: CoreML delegate not compiled in, model exported for different backend");
+            delete module;
+            char msg[512];
+            snprintf(msg, sizeof(msg), "failed to load forward method for %s (error code: %d) - check backend compatibility", path, error_code);
+            return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        }
+
+        // Get method metadata
+        ET_LOG("et_module_load_file: getting method metadata");
+        auto method_meta_result = module->module->method_meta("forward");
+        if (method_meta_result.ok()) {
+            auto& meta = method_meta_result.get();
+            module->input_count = static_cast<int32_t>(meta.num_inputs());
+            module->output_count = static_cast<int32_t>(meta.num_outputs());
+            ET_LOG("et_module_load_file: inputs=%d, outputs=%d", module->input_count, module->output_count);
+        } else {
+            ET_LOG("et_module_load_file: WARNING - could not get method metadata, assuming 1 input/output");
+            module->input_count = 1;
+            module->output_count = 1;
+        }
+
+        module->loaded = true;
+        *out = module;
+        ET_LOG("et_module_load_file: SUCCESS - module loaded at %p", static_cast<void*>(module));
+        return create_ok_status();
+
+    } catch (const std::exception& e) {
+        ET_LOG("et_module_load_file: ERROR - C++ exception: %s", e.what());
         delete module;
         char msg[512];
-        snprintf(msg, sizeof(msg), "failed to load program from: %s (error code: %d)", path, error_code);
+        snprintf(msg, sizeof(msg), "backend initialization failed: %s", e.what());
         return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
-    }
-
-    // Load the forward method (this initializes backend delegates like CoreML, MPS)
-    ET_LOG("et_module_load_file: loading forward method (initializing backend delegates)");
-    ET_LOG("et_module_load_file: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
-           ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
-    auto forward_error = module->module->load_forward();
-    if (forward_error != Error::Ok) {
-        int error_code = static_cast<int>(forward_error);
-        ET_LOG("et_module_load_file: ERROR - failed to load forward method, error code: %d", error_code);
-        ET_LOG("et_module_load_file: Model path: %s", path);
-        ET_LOG("et_module_load_file: This may indicate a backend delegate initialization failure");
-        ET_LOG("et_module_load_file: Common causes: CoreML delegate not compiled in, model exported for different backend");
+    } catch (...) {
+        ET_LOG("et_module_load_file: ERROR - unknown C++ exception");
         delete module;
-        char msg[512];
-        snprintf(msg, sizeof(msg), "failed to load forward method for %s (error code: %d) - check backend compatibility", path, error_code);
-        return create_status(ET_MODEL_LOAD_FAILED, msg, __func__);
+        return create_status(ET_MODEL_LOAD_FAILED, "unknown backend initialization error", __func__);
     }
-
-    // Get method metadata
-    ET_LOG("et_module_load_file: getting method metadata");
-    auto method_meta_result = module->module->method_meta("forward");
-    if (method_meta_result.ok()) {
-        auto& meta = method_meta_result.get();
-        module->input_count = static_cast<int32_t>(meta.num_inputs());
-        module->output_count = static_cast<int32_t>(meta.num_outputs());
-        ET_LOG("et_module_load_file: inputs=%d, outputs=%d", module->input_count, module->output_count);
-    } else {
-        ET_LOG("et_module_load_file: WARNING - could not get method metadata, assuming 1 input/output");
-        module->input_count = 1;
-        module->output_count = 1;
-    }
-
-    module->loaded = true;
-    *out = module;
-    ET_LOG("et_module_load_file: SUCCESS - module loaded at %p", static_cast<void*>(module));
-    return create_ok_status();
 }
 
 ET_API int32_t et_module_input_count(const ETModule* module) {
@@ -531,64 +557,75 @@ ET_API ETStatus* et_module_forward(
 
     std::lock_guard<std::mutex> lock(module->mutex);
 
-    // Clear previous input storage (will be repopulated during conversion)
-    ET_LOG("et_module_forward: clearing previous input storage");
-    module->input_sizes_storage.clear();
-    module->input_data_storage.clear();
+    try {
+        // Clear previous input storage (will be repopulated during conversion)
+        ET_LOG("et_module_forward: clearing previous input storage");
+        module->input_sizes_storage.clear();
+        module->input_data_storage.clear();
 
-    // Convert input tensors to EValues (stores data in module to keep alive)
-    ET_LOG("et_module_forward: converting %d input tensors", input_count);
-    std::vector<EValue> input_evalues;
-    input_evalues.reserve(input_count);
+        // Convert input tensors to EValues (stores data in module to keep alive)
+        ET_LOG("et_module_forward: converting %d input tensors", input_count);
+        std::vector<EValue> input_evalues;
+        input_evalues.reserve(input_count);
 
-    for (int32_t i = 0; i < input_count; i++) {
-        if (!inputs[i]) {
-            ET_LOG("et_module_forward: ERROR - input tensor %d is null", i);
-            return create_status(ET_INVALID_ARGUMENT, "input tensor is null", __func__);
-        }
-        // Pass module so tensor data is stored and kept alive
-        input_evalues.push_back(tensor_to_evalue(inputs[i], module, i));
-    }
-
-    // Execute forward
-    ET_LOG("et_module_forward: executing forward");
-    auto result = module->module->forward(input_evalues);
-    if (!result.ok()) {
-        ET_LOG("et_module_forward: ERROR - forward execution failed");
-        return create_status(ET_INFERENCE_FAILED, "forward execution failed", __func__);
-    }
-
-    auto& output_evalues = result.get();
-    *output_count = static_cast<int32_t>(output_evalues.size());
-    ET_LOG("et_module_forward: forward returned %d outputs", *output_count);
-
-    // Allocate output array
-    *outputs = static_cast<ETTensor**>(malloc(sizeof(ETTensor*) * (*output_count)));
-    if (!*outputs) {
-        ET_LOG("et_module_forward: ERROR - failed to allocate outputs array");
-        return create_status(ET_OUT_OF_MEMORY, "failed to allocate outputs array", __func__);
-    }
-
-    // Convert output EValues to ETTensors
-    ET_LOG("et_module_forward: converting %d output tensors", *output_count);
-    for (int32_t i = 0; i < *output_count; i++) {
-        ETTensor* out_tensor = evalue_to_tensor(output_evalues[i], i);
-        if (!out_tensor) {
-            ET_LOG("et_module_forward: ERROR - failed to convert output tensor %d", i);
-            // Clean up
-            for (int32_t j = 0; j < i; j++) {
-                delete (*outputs)[j];
+        for (int32_t i = 0; i < input_count; i++) {
+            if (!inputs[i]) {
+                ET_LOG("et_module_forward: ERROR - input tensor %d is null", i);
+                return create_status(ET_INVALID_ARGUMENT, "input tensor is null", __func__);
             }
-            free(*outputs);
-            *outputs = nullptr;
-            *output_count = 0;
-            return create_status(ET_INFERENCE_FAILED, "failed to convert output tensor", __func__);
+            // Pass module so tensor data is stored and kept alive
+            input_evalues.push_back(tensor_to_evalue(inputs[i], module, i));
         }
-        (*outputs)[i] = out_tensor;
-    }
 
-    ET_LOG("et_module_forward: SUCCESS - completed forward pass");
-    return create_ok_status();
+        // Execute forward
+        ET_LOG("et_module_forward: executing forward");
+        auto result = module->module->forward(input_evalues);
+        if (!result.ok()) {
+            ET_LOG("et_module_forward: ERROR - forward execution failed");
+            return create_status(ET_INFERENCE_FAILED, "forward execution failed", __func__);
+        }
+
+        auto& output_evalues = result.get();
+        *output_count = static_cast<int32_t>(output_evalues.size());
+        ET_LOG("et_module_forward: forward returned %d outputs", *output_count);
+
+        // Allocate output array
+        *outputs = static_cast<ETTensor**>(malloc(sizeof(ETTensor*) * (*output_count)));
+        if (!*outputs) {
+            ET_LOG("et_module_forward: ERROR - failed to allocate outputs array");
+            return create_status(ET_OUT_OF_MEMORY, "failed to allocate outputs array", __func__);
+        }
+
+        // Convert output EValues to ETTensors
+        ET_LOG("et_module_forward: converting %d output tensors", *output_count);
+        for (int32_t i = 0; i < *output_count; i++) {
+            ETTensor* out_tensor = evalue_to_tensor(output_evalues[i], i);
+            if (!out_tensor) {
+                ET_LOG("et_module_forward: ERROR - failed to convert output tensor %d", i);
+                // Clean up
+                for (int32_t j = 0; j < i; j++) {
+                    delete (*outputs)[j];
+                }
+                free(*outputs);
+                *outputs = nullptr;
+                *output_count = 0;
+                return create_status(ET_INFERENCE_FAILED, "failed to convert output tensor", __func__);
+            }
+            (*outputs)[i] = out_tensor;
+        }
+
+        ET_LOG("et_module_forward: SUCCESS - completed forward pass");
+        return create_ok_status();
+
+    } catch (const std::exception& e) {
+        ET_LOG("et_module_forward: ERROR - C++ exception: %s", e.what());
+        char msg[512];
+        snprintf(msg, sizeof(msg), "inference failed with exception: %s", e.what());
+        return create_status(ET_INFERENCE_FAILED, msg, __func__);
+    } catch (...) {
+        ET_LOG("et_module_forward: ERROR - unknown C++ exception");
+        return create_status(ET_INFERENCE_FAILED, "inference failed with unknown exception", __func__);
+    }
 }
 
 ET_API void et_module_free(ETModule* module) {
