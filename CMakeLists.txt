@@ -230,19 +230,51 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_directories(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${EXECUTORCH_LIBRARIES})
 
-# Apple delegate backends require whole-archive linking to ensure static initializers run
-# The CoreML and MPS delegates use static initialization to register themselves with
-# the backend registry. Without -force_load, the linker may strip the anonymous namespace
-# containing the static initializer that calls register_backend().
+# Backend delegates require whole-archive linking to ensure static initializers run.
+# All backends use static initialization to register themselves with the backend registry
+# via register_backend(). Without whole-archive linking, the linker may strip the anonymous
+# namespace containing the static initializer.
 # Reference: https://pytorch.org/executorch/main/backends-coreml.html
-if(APPLE AND EXECUTORCH_BUILD_MODE STREQUAL "source")
-    if(ET_BUILD_COREML AND TARGET coremldelegate)
-        target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" coremldelegate)
-        message(STATUS "CoreML backend: linked with -force_load for static registration")
-    endif()
-    if(ET_BUILD_MPS AND TARGET mpsdelegate)
-        target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" mpsdelegate)
-        message(STATUS "MPS backend: linked with -force_load for static registration")
+# Reference: upstream backends/vulkan/CMakeLists.txt uses executorch_target_link_options_shared_lib()
+if(EXECUTORCH_BUILD_MODE STREQUAL "source")
+    if(APPLE)
+        if(ET_BUILD_COREML AND TARGET coremldelegate)
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" coremldelegate)
+            message(STATUS "CoreML backend: linked with -force_load for static registration")
+        endif()
+        if(ET_BUILD_MPS AND TARGET mpsdelegate)
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" mpsdelegate)
+            message(STATUS "MPS backend: linked with -force_load for static registration")
+        endif()
+        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" vulkan_backend)
+            message(STATUS "Vulkan backend: linked with -force_load for static registration")
+        endif()
+        if(ET_BUILD_QNN AND TARGET qnn_backend)
+            target_link_libraries(${PROJECT_NAME} PRIVATE "-Wl,-force_load" qnn_backend)
+            message(STATUS "QNN backend: linked with -force_load for static registration")
+        endif()
+    elseif(MSVC)
+        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
+            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:vulkan_backend>")
+            message(STATUS "Vulkan backend: linked with /WHOLEARCHIVE for static registration")
+        endif()
+        if(ET_BUILD_QNN AND TARGET qnn_backend)
+            target_link_options(${PROJECT_NAME} PRIVATE "/WHOLEARCHIVE:$<TARGET_FILE:qnn_backend>")
+            message(STATUS "QNN backend: linked with /WHOLEARCHIVE for static registration")
+        endif()
+    else()
+        # Linux / Android - use --whole-archive / --no-whole-archive
+        if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
+            target_link_libraries(${PROJECT_NAME} PRIVATE
+                "-Wl,--whole-archive" vulkan_backend "-Wl,--no-whole-archive")
+            message(STATUS "Vulkan backend: linked with --whole-archive for static registration")
+        endif()
+        if(ET_BUILD_QNN AND TARGET qnn_backend)
+            target_link_libraries(${PROJECT_NAME} PRIVATE
+                "-Wl,--whole-archive" qnn_backend "-Wl,--no-whole-archive")
+            message(STATUS "QNN backend: linked with --whole-archive for static registration")
+        endif()
     endif()
 endif()
 

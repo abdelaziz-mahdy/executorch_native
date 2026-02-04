@@ -6,14 +6,14 @@
 # - xnnpack-vulkan (requires Vulkan SDK with glslc)
 #
 # Usage: ./build-linux.sh [VERSION]
-# Example: ./build-linux.sh 1.0.1
+# Example: ./build-linux.sh 1.1.0
 #
 # Architecture is auto-detected from host machine.
 # Vulkan builds require Vulkan SDK (glslc compiler).
 
 set -e
 
-VERSION="${1:-1.0.1}"
+VERSION="${1:-1.1.0}"
 PLATFORM="linux"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

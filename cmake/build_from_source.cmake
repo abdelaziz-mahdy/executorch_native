@@ -100,11 +100,20 @@ if(ET_BUILD_VULKAN)
     )
     if(NOT GLSLC_EXECUTABLE)
         message(WARNING "glslc not found - Vulkan backend requires glslc compiler")
-        message(WARNING "Install Vulkan SDK or set VULKAN_SDK environment variable")
+        message(WARNING "Install Vulkan SDK 1.4.321.0+ or set VULKAN_SDK environment variable")
         message(WARNING "Disabling Vulkan backend")
         set(EXECUTORCH_BUILD_VULKAN OFF CACHE BOOL "Build Vulkan backend" FORCE)
     else()
         message(STATUS "Found glslc: ${GLSLC_EXECUTABLE}")
+        # Log glslc version for debugging - an old version may lack
+        # GL_EXT_integer_dot_product support required by upstream ExecuTorch
+        execute_process(
+            COMMAND ${GLSLC_EXECUTABLE} --version
+            OUTPUT_VARIABLE _glslc_version_output
+            ERROR_VARIABLE _glslc_version_output
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        message(STATUS "glslc version: ${_glslc_version_output}")
         set(EXECUTORCH_BUILD_VULKAN ON CACHE BOOL "Build Vulkan backend" FORCE)
     endif()
 else()
@@ -431,6 +440,14 @@ set(EXECUTORCH_LIBRARIES
     portable_ops_lib
     portable_kernels
 )
+
+# Extension libraries (conditionally linked if targets exist)
+if(TARGET extension_flat_tensor)
+    list(APPEND EXECUTORCH_LIBRARIES extension_flat_tensor)
+endif()
+if(TARGET extension_named_data_map)
+    list(APPEND EXECUTORCH_LIBRARIES extension_named_data_map)
+endif()
 
 # Backend libraries
 if(ET_BUILD_XNNPACK AND TARGET xnnpack_backend)

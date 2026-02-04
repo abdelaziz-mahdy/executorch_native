@@ -10,13 +10,13 @@
 # Vulkan builds require glslc compiler (from Android NDK or Vulkan SDK)
 #
 # Usage: ./build-android.sh [VERSION]
-# Example: ./build-android.sh 1.0.1
+# Example: ./build-android.sh 1.1.0
 #
 # Requires: ANDROID_NDK_HOME environment variable
 
 set -e
 
-VERSION="${1:-1.0.1}"
+VERSION="${1:-1.1.0}"
 PLATFORM="android"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -31,12 +31,23 @@ ABIS=(
 )
 
 # Check for glslc availability (needed for Vulkan shader compilation)
-# Android NDK r21+ includes glslc in the shader-tools directory
+# Prefer Vulkan SDK glslc over NDK's - the NDK's glslc does not support
+# GL_EXT_integer_dot_product which is required by upstream ExecuTorch.
+# See: upstream backends/vulkan/cmake/ShaderLibrary.cmake
 check_vulkan() {
-    if command -v glslc &> /dev/null; then
+    # 1. Prefer Vulkan SDK glslc (supports all required extensions)
+    if [ -n "$VULKAN_SDK" ] && [ -x "$VULKAN_SDK/bin/glslc" ]; then
+        export PATH="$VULKAN_SDK/bin:$PATH"
+        echo "  Using Vulkan SDK glslc: $VULKAN_SDK/bin/glslc"
         return 0
-    elif [ -n "$ANDROID_NDK_HOME" ]; then
-        # Try to find glslc in NDK (different locations depending on NDK version)
+    fi
+    # 2. Check PATH for system-installed glslc (e.g. from package manager)
+    if command -v glslc &> /dev/null; then
+        echo "  Using system glslc: $(which glslc)"
+        return 0
+    fi
+    # 3. NDK glslc as last resort - may lack GL_EXT_integer_dot_product
+    if [ -n "$ANDROID_NDK_HOME" ]; then
         for glslc_path in \
             "$ANDROID_NDK_HOME/shader-tools/$(uname -s | tr '[:upper:]' '[:lower:]')-x86_64/glslc" \
             "$ANDROID_NDK_HOME/shader-tools/linux-x86_64/glslc" \
@@ -44,13 +55,11 @@ check_vulkan() {
             "$ANDROID_NDK_HOME/shader-tools/windows-x86_64/glslc.exe"; do
             if [ -x "$glslc_path" ]; then
                 export PATH="$(dirname "$glslc_path"):$PATH"
+                echo "  WARNING: Using NDK glslc - may lack GL_EXT_integer_dot_product support"
+                echo "  WARNING: Install Vulkan SDK 1.4.321.0+ for reliable Vulkan builds"
                 return 0
             fi
         done
-    fi
-    if [ -n "$VULKAN_SDK" ] && [ -x "$VULKAN_SDK/bin/glslc" ]; then
-        export PATH="$VULKAN_SDK/bin:$PATH"
-        return 0
     fi
     return 1
 }
