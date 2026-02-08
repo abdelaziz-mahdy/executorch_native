@@ -1,8 +1,10 @@
 # Build directories
 build/
+build-local-*/
 cmake-build-*/
 out/
 dist/
+local-builds/
 
 # IDE files
 .idea/
