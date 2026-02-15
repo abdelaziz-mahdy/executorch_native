@@ -37,6 +37,20 @@ extern "C" {
 #endif
 
 /* ============================================================================
+ * Callback Types (for async API)
+ * ============================================================================ */
+
+/**
+ * Callback with no arguments. Called when async operation completes.
+ */
+typedef void (*ETCallback_0)(void);
+
+/**
+ * Callback with one pointer argument. Called with result pointer.
+ */
+typedef void (*ETCallback_1)(void*);
+
+/* ============================================================================
  * Error Handling
  * ============================================================================ */
 
@@ -228,6 +242,77 @@ ET_API ETStatus* et_module_forward(
  * Safe to call with NULL.
  */
 ET_API void et_module_free(ETModule* module);
+
+/* ============================================================================
+ * Async Module API
+ *
+ * These functions spawn a background thread to do the work, then call the
+ * callback from that thread when done. Use with NativeCallable.listener
+ * for truly non-blocking Dart calls.
+ *
+ * Status is passed through the callback as void* (cast to ETStatus*).
+ * The caller must free the status after checking it.
+ * ============================================================================ */
+
+/**
+ * Load model from memory buffer (async, threaded).
+ *
+ * Copies data internally, spawns a thread to load the model,
+ * and calls callback(ETStatus*) from the thread when done.
+ * Returns immediately without blocking.
+ *
+ * @param data       Model data (.pte format, copied internally)
+ * @param data_size  Size of model data
+ * @param out        Output module handle (written before callback)
+ * @param callback   Called with ETStatus* when loading completes
+ */
+ET_API void et_module_load_async(
+    const uint8_t* data,
+    size_t data_size,
+    ETModule** out,
+    ETCallback_1 callback
+);
+
+/**
+ * Load model from file path (async, threaded).
+ *
+ * Copies path internally, spawns a thread to load the model,
+ * and calls callback(ETStatus*) from the thread when done.
+ * Returns immediately without blocking.
+ *
+ * @param path       Path to .pte model file (copied internally)
+ * @param out        Output module handle (written before callback)
+ * @param callback   Called with ETStatus* when loading completes
+ */
+ET_API void et_module_load_file_async(
+    const char* path,
+    ETModule** out,
+    ETCallback_1 callback
+);
+
+/**
+ * Run forward pass (async, threaded).
+ *
+ * Spawns a thread to run inference, calls callback(ETStatus*) when done.
+ * Returns immediately without blocking.
+ *
+ * Caller must keep inputs alive until callback fires.
+ *
+ * @param module       Module handle
+ * @param inputs       Array of input tensor handles
+ * @param input_count  Number of inputs
+ * @param outputs      Output array of tensor handles (written before callback)
+ * @param output_count Output number of outputs (written before callback)
+ * @param callback     Called with ETStatus* when inference completes
+ */
+ET_API void et_module_forward_async(
+    ETModule* module,
+    ETTensor** inputs,
+    int32_t input_count,
+    ETTensor*** outputs,
+    int32_t* output_count,
+    ETCallback_1 callback
+);
 
 /* ============================================================================
  * Backend Query API

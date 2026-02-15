@@ -637,6 +637,71 @@ ET_API void et_module_free(ETModule* module) {
 }
 
 /* ============================================================================
+ * Async Module Functions (threaded)
+ *
+ * These spawn a std::thread so the Dart UI thread is not blocked.
+ * The callback is called from the worker thread; NativeCallable.listener
+ * marshals it onto the Dart event loop automatically.
+ * ============================================================================ */
+
+#include <thread>
+
+ET_API void et_module_load_async(
+    const uint8_t* data,
+    size_t data_size,
+    ETModule** out,
+    ETCallback_1 callback
+) {
+    ET_LOG("et_module_load_async: spawning thread, size=%zu bytes", data_size);
+
+    // Copy data so caller can free immediately
+    std::vector<uint8_t> data_copy(data, data + data_size);
+
+    std::thread([data_copy = std::move(data_copy), out, callback]() {
+        ET_LOG("et_module_load_async: thread started");
+        ETStatus* status = et_module_load(data_copy.data(), data_copy.size(), out);
+        ET_LOG("et_module_load_async: load done, calling callback");
+        if (callback) callback(status);
+    }).detach();
+}
+
+ET_API void et_module_load_file_async(
+    const char* path,
+    ETModule** out,
+    ETCallback_1 callback
+) {
+    ET_LOG("et_module_load_file_async: spawning thread, path=%s", path ? path : "(null)");
+
+    // Copy path so caller can free immediately
+    std::string path_copy(path ? path : "");
+
+    std::thread([path_copy = std::move(path_copy), out, callback]() {
+        ET_LOG("et_module_load_file_async: thread started");
+        ETStatus* status = et_module_load_file(path_copy.c_str(), out);
+        ET_LOG("et_module_load_file_async: load done, calling callback");
+        if (callback) callback(status);
+    }).detach();
+}
+
+ET_API void et_module_forward_async(
+    ETModule* module,
+    ETTensor** inputs,
+    int32_t input_count,
+    ETTensor*** outputs,
+    int32_t* output_count,
+    ETCallback_1 callback
+) {
+    ET_LOG("et_module_forward_async: spawning thread with %d inputs", input_count);
+
+    std::thread([module, inputs, input_count, outputs, output_count, callback]() {
+        ET_LOG("et_module_forward_async: thread started");
+        ETStatus* status = et_module_forward(module, inputs, input_count, outputs, output_count);
+        ET_LOG("et_module_forward_async: forward done, calling callback");
+        if (callback) callback(status);
+    }).detach();
+}
+
+/* ============================================================================
  * Backend Query Functions
  * ============================================================================ */
 
