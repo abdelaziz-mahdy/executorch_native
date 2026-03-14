@@ -5,13 +5,14 @@
 # Device (arm64):
 #   - xnnpack
 #   - xnnpack-coreml
+#   - xnnpack-mps
+#   - xnnpack-coreml-mps
 #   - xnnpack-vulkan (via MoltenVK)
 #   - xnnpack-coreml-vulkan (via MoltenVK)
+#   - xnnpack-mps-vulkan (via MoltenVK)
+#   - xnnpack-coreml-mps-vulkan (via MoltenVK)
 # Simulator (x86_64 for Intel Macs, arm64 for Apple Silicon):
-#   - xnnpack
-#   - xnnpack-coreml
-#   - xnnpack-vulkan (via MoltenVK)
-#   - xnnpack-coreml-vulkan (via MoltenVK)
+#   - Same variants as device
 #
 # Vulkan on iOS uses MoltenVK (Vulkan-to-Metal translation layer)
 # Vulkan builds require glslc compiler (install: brew install shaderc molten-vk)
@@ -61,14 +62,18 @@ find_moltenvk_ios() {
     return 0
 }
 
-# All iOS variants: combinations of coreml and vulkan
-# Format: backends:coreml:vulkan
+# All iOS variants: combinations of coreml, mps, and vulkan
+# Format: backends:coreml:mps:vulkan
 # Define all variants - if Vulkan variant is listed and SDK is missing, build will fail
 VARIANTS=(
-  "xnnpack:OFF:OFF"
-  "xnnpack-coreml:ON:OFF"
-  "xnnpack-vulkan:OFF:ON"
-  "xnnpack-coreml-vulkan:ON:ON"
+  "xnnpack:OFF:OFF:OFF"
+  "xnnpack-coreml:ON:OFF:OFF"
+  "xnnpack-mps:OFF:ON:OFF"
+  "xnnpack-coreml-mps:ON:ON:OFF"
+  "xnnpack-vulkan:OFF:OFF:ON"
+  "xnnpack-coreml-vulkan:ON:OFF:ON"
+  "xnnpack-mps-vulkan:OFF:ON:ON"
+  "xnnpack-coreml-mps-vulkan:ON:ON:ON"
 )
 
 echo "============================================================"
@@ -97,8 +102,9 @@ install_dependencies() {
 build_device_variant() {
   local backends=$1
   local coreml=$2
-  local vulkan=$3
-  local build_type=$4
+  local mps=$3
+  local vulkan=$4
+  local build_type=$5
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local arch="arm64"
   local build_dir="${PROJECT_DIR}/build-ios-${arch}-${backends}-${build_type_lower}"
@@ -107,7 +113,7 @@ build_device_variant() {
   echo ""
   echo "=== Building ios-${arch}-${backends}-${build_type_lower} (device) ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, MPS=${mps}, Vulkan=${vulkan}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -134,7 +140,7 @@ build_device_variant() {
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
-    -DET_BUILD_MPS=OFF \
+    -DET_BUILD_MPS="${mps}" \
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
@@ -158,9 +164,10 @@ build_device_variant() {
 build_simulator_variant() {
   local backends=$1
   local coreml=$2
-  local vulkan=$3
-  local build_type=$4
-  local arch=$5  # x86_64 or arm64
+  local mps=$3
+  local vulkan=$4
+  local build_type=$5
+  local arch=$6  # x86_64 or arm64
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-ios-simulator-${arch}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-ios-simulator-${arch}-${backends}-${build_type_lower}.tar.gz"
@@ -168,7 +175,7 @@ build_simulator_variant() {
   echo ""
   echo "=== Building ios-simulator-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, MPS=${mps}, Vulkan=${vulkan}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -195,7 +202,7 @@ build_simulator_variant() {
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
-    -DET_BUILD_MPS=OFF \
+    -DET_BUILD_MPS="${mps}" \
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
@@ -230,9 +237,9 @@ echo "============================================================"
 echo "Building iOS Device variants (arm64)"
 echo "============================================================"
 for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Release"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Debug"
+  IFS=':' read -r backends coreml mps vulkan <<< "$variant"
+  build_device_variant "$backends" "$coreml" "$mps" "$vulkan" "Release"
+  build_device_variant "$backends" "$coreml" "$mps" "$vulkan" "Debug"
 done
 
 # Build all simulator variants (x86_64 for Intel Macs)
@@ -241,9 +248,9 @@ echo "============================================================"
 echo "Building iOS Simulator variants (x86_64)"
 echo "============================================================"
 for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64"
+  IFS=':' read -r backends coreml mps vulkan <<< "$variant"
+  build_simulator_variant "$backends" "$coreml" "$mps" "$vulkan" "Release" "x86_64"
+  build_simulator_variant "$backends" "$coreml" "$mps" "$vulkan" "Debug" "x86_64"
 done
 
 # Build all simulator variants (arm64 for Apple Silicon)
@@ -252,9 +259,9 @@ echo "============================================================"
 echo "Building iOS Simulator variants (arm64)"
 echo "============================================================"
 for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64"
+  IFS=':' read -r backends coreml mps vulkan <<< "$variant"
+  build_simulator_variant "$backends" "$coreml" "$mps" "$vulkan" "Release" "arm64"
+  build_simulator_variant "$backends" "$coreml" "$mps" "$vulkan" "Debug" "arm64"
 done
 
 echo ""

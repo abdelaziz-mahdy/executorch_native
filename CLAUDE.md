@@ -69,7 +69,7 @@ Controls the build process. Important options:
 | `EXECUTORCH_PREBUILT_VERSION` | current | Version tag for prebuilt downloads |
 | `ET_BUILD_XNNPACK` | ON | Enable XNNPACK backend |
 | `ET_BUILD_COREML` | OFF | Enable CoreML (Apple only) |
-| `ET_BUILD_MPS` | OFF | Enable MPS/Metal (macOS only) |
+| `ET_BUILD_MPS` | OFF | Enable MPS/Metal (Apple platforms: macOS, iOS 15.4+) |
 
 ## CI/CD Pipeline
 
@@ -169,7 +169,7 @@ ET_RETURN_ERROR(ET_ERROR_CODE, "message"); // Failure
 |---------|-----------|-------|
 | XNNPACK | All | Default CPU backend |
 | CoreML | iOS, macOS | Apple Neural Engine |
-| MPS | macOS | Metal Performance Shaders |
+| MPS | iOS, macOS | Metal Performance Shaders |
 
 ### Not Yet Enabled
 
