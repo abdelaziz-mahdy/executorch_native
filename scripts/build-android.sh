@@ -10,13 +10,13 @@
 # Vulkan builds require glslc compiler (from Android NDK or Vulkan SDK)
 #
 # Usage: ./build-android.sh [VERSION]
-# Example: ./build-android.sh 1.1.0
+# Example: ./build-android.sh 1.2.0
 #
 # Requires: ANDROID_NDK_HOME environment variable
 
 set -e
 
-VERSION="${1:-1.1.0}"
+VERSION="${1:-1.2.0}"
 PLATFORM="android"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
