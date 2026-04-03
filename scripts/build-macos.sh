@@ -9,11 +9,11 @@
 # MoltenVK is bundled with Vulkan variants for runtime use.
 #
 # Usage: ./build-macos.sh [VERSION]
-# Example: ./build-macos.sh 1.1.0
+# Example: ./build-macos.sh 1.2.0
 
 set -e
 
-VERSION="${1:-1.1.0}"
+VERSION="${1:-1.2.0}"
 PLATFORM="macos"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
