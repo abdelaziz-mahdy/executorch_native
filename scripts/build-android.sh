@@ -161,6 +161,12 @@ build_variant() {
   tar -czvf "${PROJECT_DIR}/dist/${artifact_name}" .
   cd "$PROJECT_DIR"
 
+  # Clean up build directory to free disk space
+  # FetchContent cache is in EXECUTORCH_CACHE_DIR (separate from build dir)
+  # so it's safe to remove the entire build directory after packaging
+  echo "Cleaning build directory to free disk space..."
+  rm -rf "${build_dir}"
+
   echo "Built: dist/${artifact_name}"
 }
 
