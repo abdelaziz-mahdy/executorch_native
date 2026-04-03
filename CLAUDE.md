@@ -230,6 +230,46 @@ After releasing a new native version:
    git commit -m "chore: Update native submodule to vX.X.X.X"
    ```
 
+## ExecuTorch Version Upgrade Procedure (This Repo)
+
+When a new upstream ExecuTorch version is released (e.g., 1.1.0 → 1.2.0), this repo must be updated **first** because the other repos depend on its prebuilt binaries.
+
+### Files to Update
+
+All version references from old → new:
+
+| File | What to change |
+|------|---------------|
+| `CMakeLists.txt` | `EXECUTORCH_VERSION` (line ~18) and `EXECUTORCH_PREBUILT_VERSION` (line ~25, reset W to 1) |
+| `scripts/build-android.sh` | Default `VERSION` variable and example comment |
+| `scripts/build-ios.sh` | Default `VERSION` variable and example comment |
+| `scripts/build-linux.sh` | Default `VERSION` variable and example comment |
+| `scripts/build-macos.sh` | Default `VERSION` variable and example comment |
+
+### Steps
+
+1. Create branch (e.g., `feat/executorch-X.Y.Z`)
+2. Update all version references listed above
+3. Create PR, merge to main
+4. Tag the merge commit: `git tag vX.Y.Z.1 && git push origin vX.Y.Z.1`
+5. **Wait 30-60 minutes** for CI to build all platform binaries
+6. **Verify** all artifacts appear at: `https://github.com/abdelaziz-mahdy/executorch_native/releases/tag/vX.Y.Z.1`
+7. Only then proceed to update `executorch_flutter` and `executorch_flutter_models`
+
+### Cross-Repo Release Order
+
+This repo is **step 1 of 3** in the release sequence:
+
+```
+1. executorch_native      ← THIS REPO (build prebuilt binaries)
+   ↓ (wait for CI)
+2. executorch_flutter_models (export models for new version)
+   ↓ (wait for CI)
+3. executorch_flutter      (update version refs, bump package version)
+```
+
+**CRITICAL**: The Flutter package downloads prebuilt binaries at build time. If you push version updates to `executorch_flutter` before binaries are published here, CI will fail with 404 errors.
+
 ---
 
 **Current Version**: See `EXECUTORCH_PREBUILT_VERSION` in CMakeLists.txt
