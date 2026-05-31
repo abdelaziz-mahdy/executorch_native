@@ -90,6 +90,16 @@ else()
     set(EXECUTORCH_BUILD_MPS OFF CACHE BOOL "Build MPS backend" FORCE)
 endif()
 
+# Metal backend (macOS-only): an AOTI-based delegate. Requires the
+# tensor extension and pulls in the shared AOTI runtime (aoti_common). Needs a
+# matching PyTorch + pyyaml available at build time (see build scripts).
+if(ET_BUILD_METAL AND APPLE)
+    set(EXECUTORCH_BUILD_METAL ON CACHE BOOL "Build Metal backend" FORCE)
+    set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
+else()
+    set(EXECUTORCH_BUILD_METAL OFF CACHE BOOL "Build Metal backend" FORCE)
+endif()
+
 # Vulkan requires glslc compiler - check availability when requested
 if(ET_BUILD_VULKAN)
     find_program(GLSLC_EXECUTABLE glslc
@@ -460,6 +470,14 @@ endif()
 
 if(ET_BUILD_MPS AND TARGET mpsdelegate)
     list(APPEND EXECUTORCH_LIBRARIES mpsdelegate)
+endif()
+
+# Metal delegate also needs the shared AOTI runtime (aoti_common) linked in.
+if(ET_BUILD_METAL AND TARGET metal_backend)
+    list(APPEND EXECUTORCH_LIBRARIES metal_backend)
+    if(TARGET aoti_common)
+        list(APPEND EXECUTORCH_LIBRARIES aoti_common)
+    endif()
 endif()
 
 if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
