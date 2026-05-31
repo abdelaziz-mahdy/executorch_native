@@ -26,6 +26,15 @@ concurrency:
   group: build-android-${{ github.ref }}
   cancel-in-progress: true
 
+# ccache speeds up rebuilds: a wrapper-only change reuses the cached ExecuTorch
+# object files instead of recompiling all of ExecuTorch from scratch.
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 3G
+  CCACHE_COMPILERCHECK: content
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines
+
 jobs:
   build:
     # Use ubuntu-22.04 for Vulkan SDK compatibility (jammy packages)
@@ -40,6 +49,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - name: Cache ccache (ExecuTorch object files)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-android-${{ github.run_id }}
+          restore-keys: |
+            ccache-android-
 
       - name: Setup Android NDK
         run: |
@@ -77,6 +97,10 @@ jobs:
         run: |
           chmod +x scripts/build-android.sh
           ./scripts/build-android.sh "${{ inputs.version }}"
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
