@@ -199,8 +199,11 @@ install_dependencies() {
   echo ""
   echo "=== Installing dependencies ==="
 
-  # Install Python dependencies
-  pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
+  # Install Python dependencies.
+  # The Metal backend is AOTI-based and compiles against PyTorch's AOTInductor
+  # headers, so torch must match the version ExecuTorch pins (2.11.x for the
+  # 1.3.x series). Keep this in sync with ExecuTorch's install_requirements.
+  pip install pyyaml "torch==2.11.*" --extra-index-url https://download.pytorch.org/whl/cpu
 
   # Find MoltenVK installation (installed via Homebrew in CI)
   echo "Looking for MoltenVK..."

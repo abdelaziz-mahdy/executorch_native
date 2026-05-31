@@ -383,8 +383,8 @@ ET_API ETStatus* et_module_load(
 
         // Load the forward method (this initializes backend delegates like CoreML, MPS)
         ET_LOG("et_module_load: loading forward method (initializing backend delegates)");
-        ET_LOG("et_module_load: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
-               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
+        ET_LOG("et_module_load: available backends - XNNPACK: %d, CoreML: %d, Metal: %d, Vulkan: %d",
+               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_METAL, ET_BUILD_VULKAN);
         auto forward_error = module->module->load_forward();
         if (forward_error != Error::Ok) {
             int error_code = static_cast<int>(forward_error);
@@ -474,8 +474,8 @@ ET_API ETStatus* et_module_load_file(
 
         // Load the forward method (this initializes backend delegates like CoreML, MPS)
         ET_LOG("et_module_load_file: loading forward method (initializing backend delegates)");
-        ET_LOG("et_module_load_file: available backends - XNNPACK: %d, CoreML: %d, MPS: %d, Vulkan: %d",
-               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_MPS, ET_BUILD_VULKAN);
+        ET_LOG("et_module_load_file: available backends - XNNPACK: %d, CoreML: %d, Metal: %d, Vulkan: %d",
+               ET_BUILD_XNNPACK, ET_BUILD_COREML, ET_BUILD_METAL, ET_BUILD_VULKAN);
         auto forward_error = module->module->load_forward();
         if (forward_error != Error::Ok) {
             int error_code = static_cast<int>(forward_error);
@@ -736,6 +736,10 @@ ET_API void et_module_forward_async(
     #endif
 #endif
 
+#ifndef ET_BUILD_METAL
+    #define ET_BUILD_METAL 0
+#endif
+
 #ifndef ET_BUILD_VULKAN
     #define ET_BUILD_VULKAN 0
 #endif
@@ -749,6 +753,7 @@ ET_API int32_t et_backend_available(ETBackend backend) {
         case ET_BACKEND_XNNPACK: return ET_BUILD_XNNPACK;
         case ET_BACKEND_COREML: return ET_BUILD_COREML;
         case ET_BACKEND_MPS: return ET_BUILD_MPS;
+        case ET_BACKEND_METAL: return ET_BUILD_METAL;
         case ET_BACKEND_VULKAN: return ET_BUILD_VULKAN;
         case ET_BACKEND_QNN: return ET_BUILD_QNN;
         default: return 0;
@@ -768,6 +773,9 @@ ET_API int32_t et_backend_list(ETBackend* out, int32_t max_count) {
     #endif
     #if ET_BUILD_MPS
         if (count < max_count) out[count++] = ET_BACKEND_MPS;
+    #endif
+    #if ET_BUILD_METAL
+        if (count < max_count) out[count++] = ET_BACKEND_METAL;
     #endif
     #if ET_BUILD_VULKAN
         if (count < max_count) out[count++] = ET_BACKEND_VULKAN;
