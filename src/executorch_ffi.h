@@ -324,9 +324,10 @@ ET_API void et_module_forward_async(
 typedef enum {
     ET_BACKEND_XNNPACK = 0,
     ET_BACKEND_COREML = 1,
-    ET_BACKEND_MPS = 2,
+    ET_BACKEND_MPS = 2,  // Deprecated: no longer built, kept for ABI stability
     ET_BACKEND_VULKAN = 3,
-    ET_BACKEND_QNN = 4
+    ET_BACKEND_QNN = 4,
+    ET_BACKEND_METAL = 5  // macOS-desktop GPU (AOTI); replaces MPS
 } ETBackend;
 
 /**

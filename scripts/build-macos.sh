@@ -2,9 +2,12 @@
 # build-macos.sh - Build all macOS variants (arm64 + x86_64)
 #
 # Builds ALL combinations of backends for macOS:
-# - arm64: coreml × mps combinations, plus Vulkan variants if MoltenVK available
+# - arm64: coreml × metal combinations, plus Vulkan variants if MoltenVK available
 # - x86_64: coreml combinations, plus Vulkan variants if MoltenVK available
 #
+# The Metal backend (AOTI-based, macOS-desktop GPU) replaces the deprecated MPS
+# backend and is built for arm64 only. libomp (its OpenMP runtime) is bundled
+# with Metal variants for runtime use.
 # Vulkan on macOS uses MoltenVK (Vulkan-to-Metal translation layer)
 # MoltenVK is bundled with Vulkan variants for runtime use.
 #
@@ -114,17 +117,62 @@ ICDJSON
     return 0
 }
 
-# arm64: combinations of coreml/mps/vulkan
-# Format: backends:coreml:mps:vulkan
+# Bundle libomp (the OpenMP runtime the Metal/AOTI backend links) into the
+# install directory and rewrite the FFI library to load it via @rpath, so the
+# prebuilt is relocatable (the build otherwise links an absolute libomp path).
+bundle_libomp() {
+    local install_dir=$1
+    local ffi_lib="${install_dir}/lib/libexecutorch_ffi.dylib"
+    [ -f "$ffi_lib" ] || return 0
+
+    # Path the FFI library currently references for libomp
+    local omp_ref
+    omp_ref=$(otool -L "$ffi_lib" | awk '/libomp\.dylib/ {print $1; exit}')
+    if [ -z "$omp_ref" ]; then
+        echo "  No libomp dependency in FFI library (skipping libomp bundle)"
+        return 0
+    fi
+
+    # Resolve the libomp file on disk (the referenced path, or common fallbacks)
+    local omp_src=""
+    if [ -f "$omp_ref" ]; then
+        omp_src="$omp_ref"
+    else
+        for cand in \
+            "$(python3 -c 'import os,torch;print(os.path.join(os.path.dirname(torch.__file__),"lib","libomp.dylib"))' 2>/dev/null)" \
+            "$(brew --prefix libomp 2>/dev/null)/lib/libomp.dylib" \
+            /opt/homebrew/lib/libomp.dylib \
+            /usr/local/lib/libomp.dylib; do
+            if [ -n "$cand" ] && [ -f "$cand" ]; then omp_src="$cand"; break; fi
+        done
+    fi
+    if [ -z "$omp_src" ]; then
+        echo "  WARNING: could not locate libomp ($omp_ref) to bundle"
+        return 1
+    fi
+
+    echo "  Bundling libomp for Metal variant..."
+    mkdir -p "${install_dir}/lib"
+    cp "$omp_src" "${install_dir}/lib/libomp.dylib"
+    install_name_tool -id "@rpath/libomp.dylib" "${install_dir}/lib/libomp.dylib" 2>/dev/null || true
+    install_name_tool -change "$omp_ref" "@rpath/libomp.dylib" "$ffi_lib" 2>/dev/null || true
+    # Ensure the FFI library searches its own directory for the bundled libomp
+    install_name_tool -add_rpath "@loader_path" "$ffi_lib" 2>/dev/null || true
+    echo "    Bundled libomp.dylib and repointed FFI to @rpath/libomp.dylib"
+    return 0
+}
+
+# arm64: combinations of coreml/metal/vulkan
+# Format: backends:coreml:metal:vulkan
 ARM64_VARIANTS=(
   "xnnpack:OFF:OFF:OFF"
   "xnnpack-coreml:ON:OFF:OFF"
-  "xnnpack-mps:OFF:ON:OFF"
-  "xnnpack-coreml-mps:ON:ON:OFF"
+  "xnnpack-metal:OFF:ON:OFF"
+  "xnnpack-coreml-metal:ON:ON:OFF"
   "xnnpack-vulkan:OFF:OFF:ON"
   "xnnpack-coreml-vulkan:ON:OFF:ON"
-  "xnnpack-mps-vulkan:OFF:ON:ON"
-  "xnnpack-coreml-mps-vulkan:ON:ON:ON"
+  "xnnpack-metal-vulkan:OFF:ON:ON"
+  "xnnpack-coreml-metal-vulkan:ON:ON:ON"
 )
 
 # x86_64: coreml only (no MPS on Intel)
@@ -151,8 +199,11 @@ install_dependencies() {
   echo ""
   echo "=== Installing dependencies ==="
 
-  # Install Python dependencies
-  pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
+  # Install Python dependencies.
+  # The Metal backend is AOTI-based and compiles against PyTorch's AOTInductor
+  # headers, so torch must match the version ExecuTorch pins (2.11.x for the
+  # 1.3.x series). Keep this in sync with ExecuTorch's install_requirements.
+  pip install pyyaml "torch==2.11.*" --extra-index-url https://download.pytorch.org/whl/cpu
 
   # Find MoltenVK installation (installed via Homebrew in CI)
   echo "Looking for MoltenVK..."
@@ -171,7 +222,7 @@ build_variant() {
   local arch=$1
   local backends=$2
   local coreml=$3
-  local mps=$4
+  local metal=$4
   local vulkan=$5
   local build_type=$6
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
@@ -181,7 +232,7 @@ build_variant() {
   echo ""
   echo "=== Building ${PLATFORM}-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, MPS=${mps}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Metal=${metal}, Vulkan=${vulkan}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -203,7 +254,7 @@ build_variant() {
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
-    -DET_BUILD_MPS="${mps}" \
+    -DET_BUILD_METAL="${metal}" \
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
@@ -217,6 +268,11 @@ build_variant() {
   # Bundle MoltenVK for Vulkan variants
   if [ "$vulkan" = "ON" ]; then
     bundle_moltenvk "${build_dir}/install"
+  fi
+
+  # Bundle libomp for Metal variants (AOTI runtime needs OpenMP)
+  if [ "$metal" = "ON" ]; then
+    bundle_libomp "${build_dir}/install"
   fi
 
   # Package
@@ -243,9 +299,9 @@ echo "============================================================"
 echo "Building arm64 variants (${#ARM64_VARIANTS[@]} combinations)"
 echo "============================================================"
 for variant in "${ARM64_VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml mps vulkan <<< "$variant"
-  build_variant "arm64" "$backends" "$coreml" "$mps" "$vulkan" "Release"
-  build_variant "arm64" "$backends" "$coreml" "$mps" "$vulkan" "Debug"
+  IFS=':' read -r backends coreml metal vulkan <<< "$variant"
+  build_variant "arm64" "$backends" "$coreml" "$metal" "$vulkan" "Release"
+  build_variant "arm64" "$backends" "$coreml" "$metal" "$vulkan" "Debug"
 done
 
 # Build all x86_64 variants (cross-compile on arm64 runner)

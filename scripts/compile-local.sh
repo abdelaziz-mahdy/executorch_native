@@ -184,6 +184,7 @@ ET_XNNPACK="OFF"
 ET_VULKAN="OFF"
 ET_COREML="OFF"
 ET_MPS="OFF"
+ET_METAL="OFF"
 
 IFS=',' read -ra BACKEND_LIST <<< "$BACKENDS"
 for backend in "${BACKEND_LIST[@]}"; do
@@ -192,6 +193,7 @@ for backend in "${BACKEND_LIST[@]}"; do
         vulkan)  ET_VULKAN="ON" ;;
         coreml)  ET_COREML="ON" ;;
         mps)     ET_MPS="ON" ;;
+        metal)   ET_METAL="ON" ;;
         *) echo "WARNING: Unknown backend: $backend" ;;
     esac
 done
@@ -296,6 +298,7 @@ cmake -B "$BUILD_DIR" -S "$PROJECT_DIR" \
     -DET_BUILD_XNNPACK="$ET_XNNPACK" \
     -DET_BUILD_COREML="$ET_COREML" \
     -DET_BUILD_MPS="$ET_MPS" \
+    -DET_BUILD_METAL="$ET_METAL" \
     -DET_BUILD_VULKAN="$ET_VULKAN" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="$OUTPUT_DIR"

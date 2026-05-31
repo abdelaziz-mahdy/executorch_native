@@ -41,7 +41,7 @@ endif()
 
 # Prebuilt release version (our release tag for prebuilt downloads)
 if(NOT DEFINED EXECUTORCH_PREBUILT_VERSION OR "${EXECUTORCH_PREBUILT_VERSION}" STREQUAL "")
-    set(EXECUTORCH_PREBUILT_VERSION "1.3.1.2" CACHE STRING "Prebuilt release version" FORCE)
+    set(EXECUTORCH_PREBUILT_VERSION "1.3.1.3" CACHE STRING "Prebuilt release version" FORCE)
 else()
     set(EXECUTORCH_PREBUILT_VERSION "${EXECUTORCH_PREBUILT_VERSION}" CACHE STRING "Prebuilt release version" FORCE)
 endif()
@@ -64,14 +64,17 @@ message(STATUS "============================================================")
 option(ET_BUILD_XNNPACK "Build with XNNPACK backend" ON)
 option(ET_BUILD_COREML "Build with CoreML backend" OFF)
 option(ET_BUILD_MPS "Build with MPS backend" OFF)
+option(ET_BUILD_METAL "Build with Metal backend (macOS)" OFF)
 option(ET_BUILD_VULKAN "Build with Vulkan backend" OFF)
 option(ET_BUILD_QNN "Build with QNN backend" OFF)
 
-# Platform-specific defaults
+# Platform-specific defaults.
+# CoreML is enabled on all Apple platforms. The deprecated MPS backend is
+# replaced by the new Metal backend, which is macOS-desktop-only (not iOS).
 if(APPLE)
     set(ET_BUILD_COREML ON CACHE BOOL "Build with CoreML backend" FORCE)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-        set(ET_BUILD_MPS ON CACHE BOOL "Build with MPS backend" FORCE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+        set(ET_BUILD_METAL ON CACHE BOOL "Build with Metal backend" FORCE)
     endif()
 endif()
 
@@ -102,6 +105,9 @@ if(ET_BUILD_COREML)
 endif()
 if(ET_BUILD_MPS)
     list(APPEND _variant_parts "mps")
+endif()
+if(ET_BUILD_METAL)
+    list(APPEND _variant_parts "metal")
 endif()
 if(ET_BUILD_VULKAN)
     list(APPEND _variant_parts "vulkan")
@@ -262,6 +268,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     ET_BUILD_XNNPACK=$<BOOL:${ET_BUILD_XNNPACK}>
     ET_BUILD_COREML=$<BOOL:${ET_BUILD_COREML}>
     ET_BUILD_MPS=$<BOOL:${ET_BUILD_MPS}>
+    ET_BUILD_METAL=$<BOOL:${ET_BUILD_METAL}>
     ET_BUILD_VULKAN=$<BOOL:${ET_BUILD_VULKAN}>
     ET_BUILD_QNN=$<BOOL:${ET_BUILD_QNN}>
 )
