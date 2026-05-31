@@ -631,6 +631,17 @@ ET_API ETStatus* et_module_forward(
 ET_API void et_module_free(ETModule* module) {
     if (module) {
         ET_LOG("et_module_free: freeing module at %p", static_cast<void*>(module));
+        // Wait for any in-flight forward pass to finish before freeing.
+        // et_module_forward holds module->mutex for its entire duration, so
+        // acquiring it here blocks until a running inference completes. This
+        // prevents a use-after-free of the model (and a crash deep inside the
+        // kernels, e.g. convolution_out) when the model is disposed while an
+        // async forward is still executing on a worker thread - for example
+        // when the camera is turned off mid-inference.
+        {
+            std::lock_guard<std::mutex> lock(module->mutex);
+            module->loaded = false;
+        }
         delete module;
         ET_LOG("et_module_free: module freed");
     }
