@@ -13,6 +13,25 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ----------------------------------------------------------------------------
+# Compiler cache (ccache / sccache)
+#
+# Speeds up rebuilds dramatically - especially in CI, where a wrapper-only
+# change otherwise recompiles all of ExecuTorch from scratch. When a compiler
+# cache is found it is applied to both this wrapper and the ExecuTorch subbuild
+# (CMAKE_*_COMPILER_LAUNCHER propagates to FetchContent subprojects). Harmless
+# when absent, when explicitly overridden, or with multi-config generators
+# (Xcode / Visual Studio ignore the launcher).
+# ----------------------------------------------------------------------------
+if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
+    find_program(EXECUTORCH_FFI_COMPILER_CACHE NAMES ccache sccache)
+    if(EXECUTORCH_FFI_COMPILER_CACHE)
+        message(STATUS "executorch_ffi: using compiler cache ${EXECUTORCH_FFI_COMPILER_CACHE}")
+        set(CMAKE_C_COMPILER_LAUNCHER "${EXECUTORCH_FFI_COMPILER_CACHE}")
+        set(CMAKE_CXX_COMPILER_LAUNCHER "${EXECUTORCH_FFI_COMPILER_CACHE}")
+    endif()
+endif()
+
 # ExecuTorch source version (upstream PyTorch ExecuTorch version)
 if(NOT DEFINED EXECUTORCH_VERSION OR "${EXECUTORCH_VERSION}" STREQUAL "")
     set(EXECUTORCH_VERSION "1.3.1" CACHE STRING "ExecuTorch source version" FORCE)

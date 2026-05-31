@@ -26,6 +26,15 @@ concurrency:
   group: build-linux-${{ github.ref }}
   cancel-in-progress: true
 
+# ccache speeds up rebuilds: a wrapper-only change reuses the cached ExecuTorch
+# object files instead of recompiling all of ExecuTorch from scratch.
+env:
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPILERCHECK: content
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines
+
 jobs:
   build-x64:
     runs-on: ubuntu-22.04
@@ -39,6 +48,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - name: Cache ccache (ExecuTorch object files)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-x64-${{ github.run_id }}
+          restore-keys: |
+            ccache-linux-x64-
 
       - name: Install Vulkan tools (build shaderc for glslc)
         run: |
@@ -71,6 +91,10 @@ jobs:
           chmod +x scripts/build-linux.sh
           ./scripts/build-linux.sh "${{ inputs.version }}"
 
+      - name: ccache stats
+        if: always()
+        run: ccache -s
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -90,6 +114,17 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install ccache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+
+      - name: Cache ccache (ExecuTorch object files)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-arm64-${{ github.run_id }}
+          restore-keys: |
+            ccache-linux-arm64-
 
       - name: Install Vulkan tools (build shaderc for glslc)
         run: |
@@ -122,6 +157,10 @@ jobs:
         run: |
           chmod +x scripts/build-linux.sh
           ./scripts/build-linux.sh "${{ inputs.version }}"
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
