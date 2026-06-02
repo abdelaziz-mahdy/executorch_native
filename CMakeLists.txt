@@ -67,13 +67,24 @@ option(ET_BUILD_MPS "Build with MPS backend" OFF)
 option(ET_BUILD_METAL "Build with Metal backend (macOS)" OFF)
 option(ET_BUILD_VULKAN "Build with Vulkan backend" OFF)
 option(ET_BUILD_QNN "Build with QNN backend" OFF)
+# LLM (text generation) runner FFI. OFF by default so existing tensor-only
+# prebuilt builds are unaffected. Requires a source build (or a prebuilt that
+# bundles libextension_llm_runner + libtokenizers) — see build_from_source.cmake.
+option(ET_BUILD_LLM "Build with LLM (text generation) runner FFI" OFF)
+option(ET_BUILD_LLM_HARNESS "Build the standalone LLM validation harness" OFF)
 
 # Platform-specific defaults.
 # CoreML is enabled on all Apple platforms. The deprecated MPS backend is
 # replaced by the new Metal backend, which is macOS-desktop-only (not iOS).
+# These default ON for Apple but respect an explicit OFF (the Flutter hook
+# passes ET_BUILD_* values derived from the `backends:` list — e.g. an
+# xnnpack-only LLM build must be able to keep CoreML/Metal off).
 if(APPLE)
-    set(ET_BUILD_COREML ON CACHE BOOL "Build with CoreML backend" FORCE)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    if(ET_BUILD_COREML)
+        set(ET_BUILD_COREML ON CACHE BOOL "Build with CoreML backend" FORCE)
+    endif()
+    if(ET_BUILD_METAL AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
         set(ET_BUILD_METAL ON CACHE BOOL "Build with Metal backend" FORCE)
     endif()
 endif()
@@ -178,6 +189,16 @@ message(STATUS "  Architecture: ${EXECUTORCH_ARCH}")
 # ============================================================================
 
 if(EXECUTORCH_BUILD_MODE STREQUAL "prebuilt")
+    # The LLM runner is not in the prebuilt binaries yet. Fail fast with a clear
+    # message rather than producing a library missing the et_llm_* symbols.
+    if(ET_BUILD_LLM)
+        message(FATAL_ERROR
+            "ET_BUILD_LLM=ON requires a source or local build — the prebuilt "
+            "binaries do not yet bundle the LLM runner (extension_llm_runner + "
+            "tokenizers). Rebuild with EXECUTORCH_BUILD_MODE=source, e.g.:\n"
+            "  EXECUTORCH_BUILD_MODE=source EXECUTORCH_BUILD_LLM=ON flutter run -d macos")
+    endif()
+
     # Download pre-built FFI library - no compilation needed
     include(cmake/download_prebuilt.cmake)
 
@@ -236,6 +257,13 @@ set(HEADERS
     src/executorch_ffi.h
 )
 
+# LLM runner FFI is compiled only when enabled (keeps tensor-only builds intact).
+if(ET_BUILD_LLM)
+    list(APPEND SOURCES src/executorch_llm_ffi.cpp)
+    list(APPEND HEADERS src/executorch_llm_ffi.h)
+    message(STATUS "  LLM runner FFI: ENABLED")
+endif()
+
 add_library(${PROJECT_NAME} SHARED ${SOURCES} ${HEADERS})
 
 # Export definition
@@ -271,6 +299,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     ET_BUILD_METAL=$<BOOL:${ET_BUILD_METAL}>
     ET_BUILD_VULKAN=$<BOOL:${ET_BUILD_VULKAN}>
     ET_BUILD_QNN=$<BOOL:${ET_BUILD_QNN}>
+    ET_BUILD_LLM=$<BOOL:${ET_BUILD_LLM}>
 )
 
 # ============================================================================
@@ -345,6 +374,18 @@ if(NOT WIN32)
         target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-segalign,0x4000")
         message(STATUS "  16KB page alignment: enabled (Mach-O)")
     endif()
+endif()
+
+# ============================================================================
+# LLM Validation Harness (optional, Phase 1)
+# ============================================================================
+# Standalone executable that streams generation to stdout to validate the LLM
+# runner end-to-end without Dart. Links the FFI shared library.
+if(ET_BUILD_LLM AND ET_BUILD_LLM_HARNESS)
+    add_executable(llm_harness test/llm_harness.cpp)
+    target_include_directories(llm_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(llm_harness PRIVATE ${PROJECT_NAME})
+    message(STATUS "  LLM harness: ENABLED (target: llm_harness)")
 endif()
 
 # ============================================================================
