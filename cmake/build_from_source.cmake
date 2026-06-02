@@ -55,6 +55,20 @@ set(EXECUTORCH_BUILD_EXTENSION_MODULE ON CACHE BOOL "Build extension module" FOR
 set(EXECUTORCH_BUILD_EXTENSION_FLAT_TENSOR ON CACHE BOOL "Build flat tensor extension" FORCE)
 set(EXECUTORCH_BUILD_EXTENSION_NAMED_DATA_MAP ON CACHE BOOL "Build named data map extension" FORCE)
 set(EXECUTORCH_BUILD_EXTENSION_RUNNER_UTIL ON CACHE BOOL "Build runner util extension" FORCE)
+
+# LLM (text generation) runner + tokenizers. Only when ET_BUILD_LLM is set, so
+# tensor-only builds don't pay the extra compile time / binary size.
+if(ET_BUILD_LLM)
+    set(EXECUTORCH_BUILD_EXTENSION_LLM ON CACHE BOOL "Build LLM extension" FORCE)
+    set(EXECUTORCH_BUILD_EXTENSION_LLM_RUNNER ON CACHE BOOL "Build LLM runner extension" FORCE)
+endif()
+
+# KleidiAI provides XNNPACK's ARM SME/SVE2 perf microkernels, which pull `kai/`
+# headers fetched at configure time. Those can be missing/unwired in a local source
+# build (fatal "kai/...sme_dot.h not found"). It is perf-only with no functional
+# impact, so disable it for source builds to keep XNNPACK compiling cleanly.
+set(EXECUTORCH_XNNPACK_ENABLE_KLEIDI OFF CACHE BOOL "Disable KleidiAI" FORCE)
+set(XNNPACK_ENABLE_KLEIDIAI OFF CACHE BOOL "Disable KleidiAI" FORCE)
 set(EXECUTORCH_BUILD_EXTENSION_DATA_LOADER ON CACHE BOOL "Build data loader extension" FORCE)
 set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
 set(EXECUTORCH_BUILD_KERNELS_PORTABLE ON CACHE BOOL "Build portable kernels" FORCE)
@@ -415,6 +429,23 @@ if(EXECUTORCH_BUILD_VULKAN)
     endif()
 endif()
 
+# Sentencepiece (pulled in by the LLM tokenizers library) marks its CLI tools
+# (spm_encode, spm_train, ...) as MACOSX_BUNDLE under the Xcode generator, and
+# their install() rules then fail configure with "no BUNDLE DESTINATION". We build
+# a shared library, not app bundles, so force bundles off to keep them valid.
+if(ET_BUILD_LLM AND APPLE)
+    set(CMAKE_MACOSX_BUNDLE OFF CACHE BOOL "" FORCE)
+    message(STATUS "LLM build: CMAKE_MACOSX_BUNDLE forced OFF (sentencepiece tools)")
+endif()
+
+# Newer host toolchains (e.g. Xcode 26 clang) introduce warnings that ExecuTorch's
+# older bundled third-party code (flatcc, etc.) trips with -Werror, failing an
+# otherwise-valid source build. Relax -Werror for the whole subtree. add_compile_options
+# is applied after CMAKE_C_FLAGS, so a trailing -Wno-error overrides third-party
+# `set(CMAKE_C_FLAGS "... -Werror")`; FLATCC_ALLOW_WERROR=OFF also stops flatcc adding it.
+set(FLATCC_ALLOW_WERROR OFF CACHE BOOL "Disable flatcc -Werror" FORCE)
+add_compile_options(-Wno-error)
+
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
 message(STATUS "  EXECUTORCH_BUILD_VULKAN: ${EXECUTORCH_BUILD_VULKAN}")
@@ -486,6 +517,25 @@ endif()
 
 if(ET_BUILD_QNN AND TARGET qnn_backend)
     list(APPEND EXECUTORCH_LIBRARIES qnn_backend)
+endif()
+
+# LLM runner + tokenizers (text generation). Listed dependents-before-dependencies
+# for correct static link order. Linking these targets also propagates their
+# INTERFACE include dirs (executorch/extension/llm/runner + pytorch/tokenizers).
+if(ET_BUILD_LLM)
+    if(TARGET extension_llm_runner)
+        list(APPEND EXECUTORCH_LIBRARIES extension_llm_runner)
+    endif()
+    if(TARGET extension_llm_sampler)
+        list(APPEND EXECUTORCH_LIBRARIES extension_llm_sampler)
+    endif()
+    if(TARGET tokenizers)
+        list(APPEND EXECUTORCH_LIBRARIES tokenizers)
+    endif()
+    # Belt-and-suspenders: tokenizers public headers (pytorch/tokenizers/*).
+    list(APPEND EXECUTORCH_INCLUDE_DIRS
+        ${executorch_SOURCE_DIR}/extension/llm/tokenizers/include
+    )
 endif()
 
 message(STATUS "ExecuTorch libraries: ${EXECUTORCH_LIBRARIES}")
