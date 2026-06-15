@@ -61,6 +61,34 @@ set(EXECUTORCH_BUILD_EXTENSION_RUNNER_UTIL ON CACHE BOOL "Build runner util exte
 if(ET_BUILD_LLM)
     set(EXECUTORCH_BUILD_EXTENSION_LLM ON CACHE BOOL "Build LLM extension" FORCE)
     set(EXECUTORCH_BUILD_EXTENSION_LLM_RUNNER ON CACHE BOOL "Build LLM runner extension" FORCE)
+    # Quantized LLM .pte files (optimum 8da4w linears + 8w embedding) call ops that run
+    # OUTSIDE the XNNPACK delegate — notably the quantized embedding lookup — which the
+    # runner hits on the first decode step. Without quantized_ops_lib the model loads
+    # (op resolution is lazy) but generate() fails with Error::OperatorMissing (0x14).
+    # quantized_ops_lib registers the quantized_decomposed::* namespace, which is purely
+    # additive to portable_ops_lib's aten::* — no double-registration.
+    #
+    # We deliberately do NOT enable EXECUTORCH_BUILD_KERNELS_LLM (custom_ops, llm::*
+    # sdpa_with_kv_cache etc.): (1) upstream's preset hard-requires KERNELS_OPTIMIZED
+    # whenever KERNELS_LLM is on (tools/cmake/preset/default.cmake:391), and OPTIMIZED
+    # is a superset of portable that re-registers the same aten::* ops -> would force a
+    # portable->optimized swap to avoid Error::RegistrationAlreadyRegistered (0x16);
+    # and (2) our optimum export drops --use_custom_sdpa/--use_custom_kv_cache, so the
+    # graph contains NO llm::* custom ops to begin with. If a future export needs them,
+    # enable KERNELS_LLM + KERNELS_OPTIMIZED together and swap portable->optimized.
+    set(EXECUTORCH_BUILD_KERNELS_QUANTIZED ON CACHE BOOL "Build quantized kernels" FORCE)
+    # Explicitly force OFF (not just "leave unset"): a prior configure may have cached
+    # KERNELS_LLM=ON, and the preset hard-requires KERNELS_OPTIMIZED whenever it's on.
+    set(EXECUTORCH_BUILD_KERNELS_LLM OFF CACHE BOOL "Build LLM custom kernels" FORCE)
+
+    # Enable ExecuTorch's INTERNAL logging at Error level so LLM load/generate
+    # failures surface with a message + location instead of a bare code (e.g.
+    # NotSupported 0x10). Without ENABLE_LOGGING, ET_LOG() is compiled out
+    # (ET_LOG_ENABLED=0). Error level avoids the verbose per-method Debug spam
+    # (and its perf cost) while keeping diagnostics useful. This is a COMPILE-TIME
+    # option, independent of the pubspec `debug:` flag.
+    set(EXECUTORCH_ENABLE_LOGGING ON CACHE BOOL "Enable ExecuTorch ET_LOG" FORCE)
+    set(EXECUTORCH_LOG_LEVEL "Error" CACHE STRING "ExecuTorch log verbosity" FORCE)
 endif()
 
 # KleidiAI provides XNNPACK's ARM SME/SVE2 perf microkernels, which pull `kai/`
@@ -112,6 +140,41 @@ if(ET_BUILD_METAL AND APPLE)
     set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
 else()
     set(EXECUTORCH_BUILD_METAL OFF CACHE BOOL "Build Metal backend" FORCE)
+endif()
+
+# MLX backend (Apple-Silicon GPU, macOS desktop): the native runtime for
+# Gemma 4 LLMs exported with the MLX partitioner (--qlinear 4w
+# --use-custom-sdpa --use-custom-kv-cache). Distinct from the Metal-AOTI
+# backend above. Builds MLX from the backends/mlx/third-party/mlx submodule
+# (Metal-only, JIT kernels) and links the mlxdelegate.
+#
+# Kernels: we keep the default PORTABLE kernels (NOT the optimized set the
+# upstream mlx preset uses). On Xcode 26.5 / ET 1.3.1 the optimized kernels fail
+# to compile — kernels/portable/cpu/util/upsample_util.cpp instantiates
+# memory_allocator.h's allocateList<T>, whose c10::mul_overflows(size_t,...) call
+# does not match the uint64_t* overload on arm64-macOS (size_t = unsigned long !=
+# uint64_t = unsigned long long); this is the same array_ref.h/mul_overflows bug
+# that blocks the Metal-AOTI backend (executorch#19907). MLX does NOT need
+# optimized: its sdpa/kv run inside the MLX delegate, and the model's only graph
+# fallback (aten.bitwise_or) is provided by portable_ops_lib. Staying on portable
+# also avoids the optimized<->portable aten::* double-registration (0x16).
+#
+# Hard requirement: deployment target >= macOS 14.0 (the MLX CMakeLists
+# FATAL_ERRORs below that).
+if(ET_BUILD_MLX AND APPLE)
+    set(EXECUTORCH_BUILD_MLX ON CACHE BOOL "Build MLX backend" FORCE)
+    set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
+    # MLX requires macOS 14.0+. native_toolchain_cmake passes DEPLOYMENT_TARGET
+    # from codeConfig.macOS.targetVersion (Flutter default = 13), and the MLX
+    # CMakeLists checks DEPLOYMENT_TARGET (NOT CMAKE_OSX_DEPLOYMENT_TARGET) and
+    # FATAL_ERRORs below 14.0. Force both to 14.0 here, before add_subdirectory:
+    # this both satisfies the check and ensures every ET/MLX target compiles for
+    # macOS 14 (so MLX's 14-only Metal APIs are available). The example app's
+    # macOS deployment target must match (raised to 14.0).
+    set(DEPLOYMENT_TARGET "14.0" CACHE STRING "MLX requires macOS 14+" FORCE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "MLX requires macOS 14+" FORCE)
+else()
+    set(EXECUTORCH_BUILD_MLX OFF CACHE BOOL "Build MLX backend" FORCE)
 endif()
 
 # Vulkan requires glslc compiler - check availability when requested
@@ -438,6 +501,130 @@ if(ET_BUILD_LLM AND APPLE)
     message(STATUS "LLM build: CMAKE_MACOSX_BUNDLE forced OFF (sentencepiece tools)")
 endif()
 
+# The MLX delegate builds MLX from the backends/mlx/third-party/mlx submodule and
+# FATAL_ERRORs at configure time if it is not initialized. FetchContent only pulls
+# the submodules listed at clone time, and a pre-existing source checkout may not
+# have it, so init it on demand (non-recursive — MLX pulls its own deps via CMake).
+if(EXECUTORCH_BUILD_MLX)
+    set(_mlx_submodule_dir "${executorch_SOURCE_DIR}/backends/mlx/third-party/mlx")
+    if(NOT EXISTS "${_mlx_submodule_dir}/CMakeLists.txt")
+        message(STATUS "MLX submodule missing, fetching it...")
+        execute_process(
+            COMMAND git submodule update --init backends/mlx/third-party/mlx
+            WORKING_DIRECTORY ${executorch_SOURCE_DIR}
+            RESULT_VARIABLE _mlx_submodule_result
+        )
+        if(NOT _mlx_submodule_result EQUAL 0
+           OR NOT EXISTS "${_mlx_submodule_dir}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "Failed to initialize the MLX submodule at ${_mlx_submodule_dir}.\n"
+                "Run manually: cd ${executorch_SOURCE_DIR} && "
+                "git submodule update --init backends/mlx/third-party/mlx")
+        endif()
+        message(STATUS "MLX submodule fetched successfully")
+    else()
+        message(STATUS "MLX submodule present at ${_mlx_submodule_dir}")
+    endif()
+
+    # MLX compiles Metal shaders (-> mlx.metallib) with the `metal` tool, which
+    # Xcode 15+/26 ships as a SEPARATE downloadable "Metal Toolchain" component.
+    # Without it the build dies deep in compilation with a cryptic
+    # "cannot execute tool 'metal' due to missing Metal Toolchain". Pre-check and
+    # fail fast with the exact fix.
+    execute_process(
+        COMMAND xcrun metal --version
+        RESULT_VARIABLE _metal_check
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT _metal_check EQUAL 0)
+        message(FATAL_ERROR
+            "MLX backend requires the Xcode Metal Toolchain, which is not "
+            "installed (xcrun metal failed).\n"
+            "Install it once with:\n"
+            "  xcodebuild -downloadComponent MetalToolchain\n"
+            "then rebuild. (Verify with: xcodebuild -showComponent MetalToolchain)")
+    endif()
+    message(STATUS "MLX: Metal Toolchain present")
+
+    # backends/mlx/CMakeLists.txt compiles mlxdelegate with `-Werror` (its
+    # _common_compile_options). mlxdelegate includes ExecuTorch core headers
+    # (dim_order_util.h, tensor_util.h) that emit -Wshorten-64-to-32 warnings on
+    # Xcode 26.5 / arm64-macOS, so -Werror turns them into hard errors. Our global
+    # add_compile_options(-Wno-error) can't help because the target appends
+    # -Werror AFTER it. Patch -Werror out of MLX's option list (idempotent).
+    set(_mlx_cmakelists "${executorch_SOURCE_DIR}/backends/mlx/CMakeLists.txt")
+    if(EXISTS "${_mlx_cmakelists}")
+        file(READ "${_mlx_cmakelists}" _mlx_cml_content)
+        string(FIND "${_mlx_cml_content}" "-Wall -Werror -Wno-deprecated-declarations" _mlx_werror_pos)
+        if(NOT _mlx_werror_pos EQUAL -1)
+            string(REPLACE
+                "-Wall -Werror -Wno-deprecated-declarations"
+                "-Wall -Wno-deprecated-declarations -Wno-shorten-64-to-32"
+                _mlx_cml_content "${_mlx_cml_content}")
+            file(WRITE "${_mlx_cmakelists}" "${_mlx_cml_content}")
+            message(STATUS "MLX: patched -Werror out of backends/mlx/CMakeLists.txt")
+        else()
+            message(STATUS "MLX: -Werror already patched out of backends/mlx/CMakeLists.txt")
+        endif()
+    endif()
+
+    # Patch MLX's metallib loader to honor the ET_MLX_METALLIB_PATH env var FIRST.
+    # MLX bundles its Metal kernels as mlx.metallib and at runtime searches only
+    # next to the loaded binary / a couple of Resources dirs / a compile-time
+    # absolute path. Inside a sandboxed Flutter app the dylib lives in a generated
+    # .framework and the native-assets bundler does not place the .metallib there,
+    # so every search fails (MLXBackend init -> 0x23). We ship the metallib as a
+    # Flutter data asset and point MLX at it via the env var, which our FFI
+    # (et_llm_set_metallib_path) sets before model load. Idempotent string patch
+    # into load_default_library() in device.cpp.
+    set(_mlx_device_cpp
+        "${_mlx_submodule_dir}/mlx/backend/metal/device.cpp")
+    if(EXISTS "${_mlx_device_cpp}")
+        file(READ "${_mlx_device_cpp}" _mlx_dev_content)
+        string(FIND "${_mlx_dev_content}" "ET_MLX_METALLIB_PATH" _mlx_env_pos)
+        if(_mlx_env_pos EQUAL -1)
+            # Insert an env-var lookup as the first attempt inside
+            # load_default_library(MTL::Device* device) { ... }
+            string(REPLACE
+                "MTL::Library* load_default_library(MTL::Device* device) {"
+                "MTL::Library* load_default_library(MTL::Device* device) {\n  // ExecuTorch Flutter: explicit metallib path (sandboxed app bundles).\n  if (const char* _et_mtllib = std::getenv(\"ET_MLX_METALLIB_PATH\")) {\n    if (_et_mtllib[0] != '\\0') {\n      auto [_et_lib, _et_err] = load_library_from_path(device, _et_mtllib);\n      if (_et_lib) {\n        return _et_lib;\n      }\n    }\n  }"
+                _mlx_dev_content "${_mlx_dev_content}")
+            file(WRITE "${_mlx_device_cpp}" "${_mlx_dev_content}")
+            message(STATUS "MLX: patched ET_MLX_METALLIB_PATH lookup into device.cpp")
+        else()
+            message(STATUS "MLX: ET_MLX_METALLIB_PATH lookup already patched into device.cpp")
+        endif()
+    else()
+        message(WARNING "MLX device.cpp not found at ${_mlx_device_cpp}; metallib env override not applied")
+    endif()
+endif()
+
+# The optimized CPU kernels (enabled for MLX, see above) build EigenBLAS from the
+# kernels/optimized/third-party/eigen submodule and CMake-error ("No SOURCES
+# given to target: eigen_blas") if it is not initialized. Same situation as the
+# MLX submodule — init it on demand for pre-existing source checkouts.
+if(EXECUTORCH_BUILD_KERNELS_OPTIMIZED)
+    set(_eigen_submodule_dir "${executorch_SOURCE_DIR}/kernels/optimized/third-party/eigen")
+    if(NOT EXISTS "${_eigen_submodule_dir}/blas/single.cpp")
+        message(STATUS "Eigen submodule missing, fetching it...")
+        execute_process(
+            COMMAND git submodule update --init kernels/optimized/third-party/eigen
+            WORKING_DIRECTORY ${executorch_SOURCE_DIR}
+            RESULT_VARIABLE _eigen_submodule_result
+        )
+        if(NOT _eigen_submodule_result EQUAL 0
+           OR NOT EXISTS "${_eigen_submodule_dir}/blas/single.cpp")
+            message(FATAL_ERROR
+                "Failed to initialize the Eigen submodule at ${_eigen_submodule_dir}.\n"
+                "Run manually: cd ${executorch_SOURCE_DIR} && "
+                "git submodule update --init kernels/optimized/third-party/eigen")
+        endif()
+        message(STATUS "Eigen submodule fetched successfully")
+    else()
+        message(STATUS "Eigen submodule present at ${_eigen_submodule_dir}")
+    endif()
+endif()
+
 # Newer host toolchains (e.g. Xcode 26 clang) introduce warnings that ExecuTorch's
 # older bundled third-party code (flatcc, etc.) trips with -Werror, failing an
 # otherwise-valid source build. Relax -Werror for the whole subtree. add_compile_options
@@ -478,9 +665,22 @@ set(EXECUTORCH_LIBRARIES
     extension_module_static
     extension_data_loader
     extension_tensor
-    portable_ops_lib
-    portable_kernels
 )
+
+# Op registration table. The MLX build swaps portable -> optimized: linking BOTH
+# would double-register the aten::* ops (RegistrationAlreadyRegistered, 0x16).
+# optimized_native_cpu_ops_lib registers optimized kernels and falls back to
+# portable_kernels per-op, so portable_kernels is still linked as the impl source.
+# Unlike the backend delegates, op libs do NOT self-apply whole-archive, so the
+# static op-registration initializers must be force-loaded explicitly (same as
+# quantized_ops_lib below) or generate() hits OperatorMissing (0x14).
+if(EXECUTORCH_BUILD_KERNELS_OPTIMIZED AND TARGET optimized_native_cpu_ops_lib)
+    list(APPEND EXECUTORCH_LIBRARIES optimized_native_cpu_ops_lib portable_kernels)
+    executorch_target_link_options_shared_lib(optimized_native_cpu_ops_lib)
+    message(STATUS "Using optimized CPU op kernels (optimized_native_cpu_ops_lib)")
+else()
+    list(APPEND EXECUTORCH_LIBRARIES portable_ops_lib portable_kernels)
+endif()
 
 # Extension libraries (conditionally linked if targets exist)
 if(TARGET extension_flat_tensor)
@@ -511,6 +711,17 @@ if(ET_BUILD_METAL AND TARGET metal_backend)
     endif()
 endif()
 
+# MLX delegate. mlxdelegate self-applies whole-archive (its CMakeLists calls
+# executorch_target_link_options_shared_lib) so its backend registration
+# survives linking. The MLX library itself is only exposed at BUILD_INTERFACE on
+# mlxdelegate, so the MLX symbols (mlx::core::*) must be linked explicitly.
+if(ET_BUILD_MLX AND TARGET mlxdelegate)
+    list(APPEND EXECUTORCH_LIBRARIES mlxdelegate)
+    if(TARGET mlx)
+        list(APPEND EXECUTORCH_LIBRARIES mlx)
+    endif()
+endif()
+
 if(ET_BUILD_VULKAN AND TARGET vulkan_backend)
     list(APPEND EXECUTORCH_LIBRARIES vulkan_backend)
 endif()
@@ -531,6 +742,15 @@ if(ET_BUILD_LLM)
     endif()
     if(TARGET tokenizers)
         list(APPEND EXECUTORCH_LIBRARIES tokenizers)
+    endif()
+    # Quantized op kernel library. Unlike the backend delegates, this op lib does NOT
+    # self-apply whole-archive via its INTERFACE options, so we must call
+    # executorch_target_link_options_shared_lib() on it (the same helper the upstream
+    # gemma4 runner uses). Otherwise the linker strips its static kernel registrations
+    # and generate() hits OperatorMissing (0x14) at the first decode step.
+    if(TARGET quantized_ops_lib)
+        list(APPEND EXECUTORCH_LIBRARIES quantized_ops_lib)
+        executorch_target_link_options_shared_lib(quantized_ops_lib)
     endif()
     # Belt-and-suspenders: tokenizers public headers (pytorch/tokenizers/*).
     list(APPEND EXECUTORCH_INCLUDE_DIRS

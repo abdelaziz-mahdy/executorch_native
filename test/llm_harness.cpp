@@ -55,8 +55,8 @@ int main(int argc, char** argv) {
     memset(&cfg, 0, sizeof(cfg));
     cfg.max_new_tokens = max_new_tokens;
     cfg.seq_len = -1;
-    cfg.temperature = 0.8f;
-    cfg.echo = 1;        // echo the prompt so output reads naturally
+    cfg.temperature = 0.0f;  // greedy (argmax) — deterministic, matches run_llm_hf
+    cfg.echo = 0;        // don't echo the prompt — only show generated text
     cfg.ignore_eos = 0;
 
     printf("--- generating (max_new_tokens=%d) ---\n", max_new_tokens);

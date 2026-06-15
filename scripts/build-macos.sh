@@ -184,6 +184,20 @@ X64_VARIANTS=(
   "xnnpack-coreml-vulkan:ON:ON"
 )
 
+# LLM (text generation) variants — separate from the tensor-only variants above
+# so vision builds don't carry the runner/tokenizers. The variant name MUST match
+# the suffix EXECUTORCH_VARIANT computes (xnnpack + [mlx] + llm), so the package's
+# prebuilt download resolves. Format: name:coreml:metal:vulkan:mlx:llm
+#  - xnnpack-llm     : CPU LLM (works on any arch)
+#  - xnnpack-mlx-llm : Apple-Silicon GPU LLM (arm64 only; bundles mlx.metallib)
+ARM64_LLM_VARIANTS=(
+  "xnnpack-llm:OFF:OFF:OFF:OFF:ON"
+  "xnnpack-mlx-llm:OFF:OFF:OFF:ON:ON"
+)
+X64_LLM_VARIANTS=(
+  "xnnpack-llm:OFF:OFF:OFF:OFF:ON"
+)
+
 echo "============================================================"
 echo "ExecuTorch macOS Build Script"
 echo "============================================================"
@@ -214,6 +228,13 @@ install_dependencies() {
     echo "         Install with: brew install molten-vk"
   fi
 
+  # The MLX LLM variant compiles Metal shaders (mlx.metallib) with the `metal`
+  # tool, which Xcode 15+/26 ships as a separate downloadable component. Install
+  # it so the xnnpack-mlx-llm build doesn't fail with "cannot execute tool 'metal'".
+  echo "Ensuring Xcode Metal Toolchain is installed (for the MLX LLM variant)..."
+  xcodebuild -downloadComponent MetalToolchain 2>/dev/null || \
+    echo "WARNING: could not download Metal Toolchain; xnnpack-mlx-llm may fail."
+
   echo "Dependencies installed successfully"
 }
 
@@ -225,14 +246,19 @@ build_variant() {
   local metal=$4
   local vulkan=$5
   local build_type=$6
+  local llm=${7:-OFF}
+  local mlx=${8:-OFF}
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${arch}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-${PLATFORM}-${arch}-${backends}-${build_type_lower}.tar.gz"
+  # MLX requires a macOS 14.0+ deployment target; everything else uses 11.0.
+  local deploy=11.0
+  [ "$mlx" = "ON" ] && deploy=14.0
 
   echo ""
   echo "=== Building ${PLATFORM}-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Metal=${metal}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Metal=${metal}, Vulkan=${vulkan}, MLX=${mlx}, LLM=${llm}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -248,7 +274,7 @@ build_variant() {
   cmake -B "$build_dir" -S "$PROJECT_DIR" \
     -DCMAKE_BUILD_TYPE="${build_type}" \
     -DCMAKE_OSX_ARCHITECTURES="${arch}" \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="${deploy}" \
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
@@ -256,6 +282,8 @@ build_variant() {
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_METAL="${metal}" \
     -DET_BUILD_VULKAN="${vulkan}" \
+    -DET_BUILD_MLX="${mlx}" \
+    -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
@@ -313,6 +341,28 @@ for variant in "${X64_VARIANTS[@]}"; do
   IFS=':' read -r backends coreml vulkan <<< "$variant"
   build_variant "x86_64" "$backends" "$coreml" "OFF" "$vulkan" "Release"
   build_variant "x86_64" "$backends" "$coreml" "OFF" "$vulkan" "Debug"
+done
+
+# Build LLM variants (arm64). xnnpack-mlx-llm needs the Xcode Metal Toolchain.
+echo ""
+echo "============================================================"
+echo "Building arm64 LLM variants (${#ARM64_LLM_VARIANTS[@]})"
+echo "============================================================"
+for variant in "${ARM64_LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends coreml metal vulkan mlx llm <<< "$variant"
+  build_variant "arm64" "$backends" "$coreml" "$metal" "$vulkan" "Release" "$llm" "$mlx"
+  build_variant "arm64" "$backends" "$coreml" "$metal" "$vulkan" "Debug" "$llm" "$mlx"
+done
+
+# Build LLM variants (x86_64) — CPU only (no MLX on Intel).
+echo ""
+echo "============================================================"
+echo "Building x86_64 LLM variants (${#X64_LLM_VARIANTS[@]})"
+echo "============================================================"
+for variant in "${X64_LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends coreml metal vulkan mlx llm <<< "$variant"
+  build_variant "x86_64" "$backends" "$coreml" "OFF" "$vulkan" "Release" "$llm" "OFF"
+  build_variant "x86_64" "$backends" "$coreml" "OFF" "$vulkan" "Debug" "$llm" "OFF"
 done
 
 echo ""

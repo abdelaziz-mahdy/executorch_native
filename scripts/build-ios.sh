@@ -74,6 +74,15 @@ VARIANTS=(
   "xnnpack-coreml-vulkan:ON:ON"
 )
 
+# LLM (text generation) variants — separate from the tensor-only variants above
+# so vision builds don't carry the runner/tokenizers. The variant name MUST match
+# the suffix EXECUTORCH_VARIANT computes (xnnpack + llm), so the package's prebuilt
+# download resolves. Format: backends:coreml:vulkan:llm
+#  - xnnpack-llm : CPU LLM (pure XNNPACK, builds on device + simulator)
+LLM_VARIANTS=(
+  "xnnpack-llm:OFF:OFF:ON"
+)
+
 echo "============================================================"
 echo "ExecuTorch iOS Build Script"
 echo "============================================================"
@@ -102,6 +111,7 @@ build_device_variant() {
   local coreml=$2
   local vulkan=$3
   local build_type=$4
+  local llm=${5:-OFF}
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local arch="arm64"
   local build_dir="${PROJECT_DIR}/build-ios-${arch}-${backends}-${build_type_lower}"
@@ -110,7 +120,7 @@ build_device_variant() {
   echo ""
   echo "=== Building ios-${arch}-${backends}-${build_type_lower} (device) ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}, LLM=${llm}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -138,6 +148,7 @@ build_device_variant() {
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_VULKAN="${vulkan}" \
+    -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
@@ -163,6 +174,7 @@ build_simulator_variant() {
   local vulkan=$3
   local build_type=$4
   local arch=$5  # x86_64 or arm64
+  local llm=${6:-OFF}
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-ios-simulator-${arch}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-ios-simulator-${arch}-${backends}-${build_type_lower}.tar.gz"
@@ -170,7 +182,7 @@ build_simulator_variant() {
   echo ""
   echo "=== Building ios-simulator-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, CoreML=${coreml}, Vulkan=${vulkan}, LLM=${llm}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -198,6 +210,7 @@ build_simulator_variant() {
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_VULKAN="${vulkan}" \
+    -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
@@ -236,6 +249,13 @@ for variant in "${VARIANTS[@]}"; do
   build_device_variant "$backends" "$coreml" "$vulkan" "Debug"
 done
 
+# Build LLM device variants (pure CPU/XNNPACK)
+for variant in "${LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+  build_device_variant "$backends" "$coreml" "$vulkan" "Release" "$llm"
+  build_device_variant "$backends" "$coreml" "$vulkan" "Debug" "$llm"
+done
+
 # Build all simulator variants (x86_64 for Intel Macs)
 echo ""
 echo "============================================================"
@@ -247,6 +267,13 @@ for variant in "${VARIANTS[@]}"; do
   build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64"
 done
 
+# Build LLM simulator variants (x86_64, pure CPU/XNNPACK)
+for variant in "${LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64" "$llm"
+  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64" "$llm"
+done
+
 # Build all simulator variants (arm64 for Apple Silicon)
 echo ""
 echo "============================================================"
@@ -256,6 +283,13 @@ for variant in "${VARIANTS[@]}"; do
   IFS=':' read -r backends coreml vulkan <<< "$variant"
   build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64"
   build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64"
+done
+
+# Build LLM simulator variants (arm64, pure CPU/XNNPACK)
+for variant in "${LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64" "$llm"
+  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64" "$llm"
 done
 
 echo ""

@@ -23,9 +23,20 @@
 #include <executorch/extension/llm/runner/llm_runner_helper.h>
 #include <executorch/extension/llm/runner/stats.h>
 #include <executorch/extension/llm/runner/text_llm_runner.h>
+// Components for building the runner ourselves (to auto-select the prefill mode).
+#include <executorch/extension/llm/runner/constants.h>
+#include <executorch/extension/llm/runner/io_manager/io_manager.h>
+#include <executorch/extension/llm/runner/text_decoder_runner.h>
+#include <executorch/extension/llm/runner/text_prefiller.h>
+#include <executorch/extension/llm/runner/text_token_generator.h>
+#include <executorch/extension/llm/sampler/sampler.h>
 #include <executorch/extension/module/module.h>
 #include <executorch/runtime/core/error.h>
 #include <pytorch/tokenizers/tokenizer.h>
+
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace llm = executorch::extension::llm;
 using executorch::runtime::Error;
@@ -101,6 +112,111 @@ static llm::GenerationConfig to_generation_config(const ETGenConfig* cfg) {
 }
 
 /* ============================================================================
+ * Runner construction — auto-select prefill mode
+ * ============================================================================ */
+
+namespace {
+
+// Build a TextLLMRunner, choosing the prefill mode from the model's ACTUAL
+// forward input shape rather than the enable_dynamic_shape metadata (some
+// exports mislabel it true). Quantized XNNPACK exports are decode-only/static —
+// forward's token input is a fixed (1, 1) tensor — so a (1, N) parallel prefill
+// aborts with NotSupported (0x10); they must be prefilled one token at a time.
+// Genuinely dynamic exports (e.g. the MLX model) accept (1, N) and prefill in
+// one parallel pass. Detect: forward input[0] seq dim > 1 -> parallel, else
+// sequential. Body otherwise mirrors create_text_llm_runner (v1.3.1); the stop
+// set comes from the model's get_eos_ids metadata (no special-casing here).
+static std::unique_ptr<llm::TextLLMRunner> create_text_llm_runner_auto(
+    const std::string& model_path,
+    std::unique_ptr<tokenizers::Tokenizer> tokenizer,
+    const std::optional<const std::string>& /*data_path*/) {
+    using executorch::extension::Module;
+    namespace el = executorch::extension::llm;
+
+    auto module = std::make_unique<Module>(
+        model_path, Module::LoadMode::MmapUseMlockIgnoreErrors);
+
+    auto metadata_result = el::get_llm_metadata(tokenizer.get(), module.get());
+    if (metadata_result.error() != Error::Ok) {
+        return nullptr;
+    }
+    auto metadata = metadata_result.get();
+
+    auto eos_ids = std::make_unique<std::unordered_set<uint64_t>>(
+        el::get_eos_ids(tokenizer.get(), module.get()));
+
+    // get_eos_ids() above reads the `get_eos_ids` (PLURAL) constant method, but
+    // optimum-exported models name it `get_eos_id` (SINGULAR) — so their declared
+    // stop set (e.g. Gemma's [1, 106] where 106 = <end_of_turn>) is otherwise
+    // ignored and generation never stops. Merge the singular method's values too.
+    // This reads the model's OWN metadata (no model-specific token hardcoding).
+    {
+        auto names = module->method_names();
+        if (names.ok() && names.get().count("get_eos_id")) {
+            auto r = module->execute("get_eos_id");
+            if (r.ok()) {
+                for (const auto& v : r.get()) {
+                    if (v.isScalar()) {
+                        eos_ids->insert(
+                            static_cast<uint64_t>(v.toScalar().to<int64_t>()));
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-detect prefill mode from forward's token-input seq dimension.
+    bool enable_parallel_prefill = false;
+    auto method_meta = module->method_meta("forward");
+    if (method_meta.ok() && method_meta->num_inputs() > 0) {
+        auto in0 = method_meta->input_tensor_meta(0);
+        if (in0.ok()) {
+            auto sizes = in0->sizes();
+            if (sizes.size() >= 2 && sizes[1] > 1) {
+                enable_parallel_prefill = true;
+            }
+        }
+    }
+    ETLLM_LOG("prefill mode: %s", enable_parallel_prefill ? "parallel" : "sequential");
+
+    std::unique_ptr<el::IOManager> io_manager =
+        std::make_unique<el::IOManager>(*module);
+
+    const int32_t vocab_size = static_cast<int32_t>(metadata.at(el::kVocabSize));
+    auto sampler = std::make_unique<el::Sampler>(vocab_size, /*temperature=*/0.0f);
+
+    auto text_decoder_runner = std::make_unique<el::TextDecoderRunner>(
+        module.get(), io_manager.get(), "forward", std::move(sampler));
+
+    auto text_prefiller = std::make_unique<el::TextPrefiller>(
+        text_decoder_runner.get(),
+        metadata.at(el::kUseKVCache),
+        enable_parallel_prefill,
+        metadata.at(el::kMaxSeqLen));
+
+    auto stats = std::make_unique<el::Stats>();
+    auto text_token_generator = std::make_unique<el::TextTokenGenerator>(
+        tokenizer.get(),
+        text_decoder_runner.get(),
+        metadata.at(el::kUseKVCache),
+        std::move(eos_ids),
+        stats.get());
+
+    return std::make_unique<el::TextLLMRunner>(
+        std::move(metadata),
+        std::move(tokenizer),
+        std::move(module),
+        std::move(text_decoder_runner),
+        std::move(text_prefiller),
+        std::move(io_manager),
+        std::move(text_token_generator),
+        std::move(stats),
+        /*temperature=*/-1.0f);
+}
+
+} // namespace
+
+/* ============================================================================
  * Lifecycle
  * ============================================================================ */
 
@@ -139,8 +255,12 @@ ET_API ETStatus* et_llm_runner_create(const char* model_path,
                 ? std::optional<const std::string>(std::string(data_path))
                 : std::optional<const std::string>(std::nullopt);
 
+        // Build the runner with auto-selected prefill mode (static -> sequential,
+        // dynamic -> parallel). The model must expose the LLM metadata constant
+        // methods (get_max_seq_len, use_kv_cache, get_vocab_size) and its stop set
+        // via get_eos_ids; both our Gemma 4 exports embed get_eos_ids = [1, 106].
         std::unique_ptr<llm::TextLLMRunner> runner =
-            llm::create_text_llm_runner(std::string(model_path), std::move(tokenizer), data_opt);
+            create_text_llm_runner_auto(std::string(model_path), std::move(tokenizer), data_opt);
         if (!runner) {
             return create_status(ET_MODEL_LOAD_FAILED, "failed to create text LLM runner", __func__);
         }
@@ -272,3 +392,17 @@ ET_API void et_llm_reset(ETLLMRunner* runner) {
     std::lock_guard<std::mutex> lock(runner->mutex);
     runner->runner->reset();
 }
+
+ET_API void et_llm_set_metallib_path(const char* path) {
+    // The MLX delegate's Metal device loader (patched device.cpp) checks
+    // ET_MLX_METALLIB_PATH first. Set it so MLX can find mlx.metallib at a
+    // sandbox-readable location (Flutter ships it as a data asset; Dart copies it
+    // to a writable dir and passes the path here before creating the runner).
+    if (path && path[0] != '\0') {
+        setenv("ET_MLX_METALLIB_PATH", path, /*overwrite=*/1);
+        ETLLM_LOG("ET_MLX_METALLIB_PATH set to %s", path);
+    } else {
+        unsetenv("ET_MLX_METALLIB_PATH");
+    }
+}
+

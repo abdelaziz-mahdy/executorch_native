@@ -52,6 +52,15 @@ VARIANTS=(
   "xnnpack-vulkan:ON"
 )
 
+# LLM (text generation) variants — separate from the tensor-only variants above
+# so vision builds don't carry the runner/tokenizers. The variant name MUST match
+# the suffix EXECUTORCH_VARIANT computes (xnnpack + llm), so the package's prebuilt
+# download resolves. Format: backends:vulkan:llm
+#  - xnnpack-llm : CPU LLM (pure XNNPACK)
+LLM_VARIANTS=(
+  "xnnpack-llm:OFF:ON"
+)
+
 echo "============================================================"
 echo "ExecuTorch Linux Build Script"
 echo "============================================================"
@@ -80,6 +89,7 @@ build_variant() {
   local backends=$1
   local vulkan=$2
   local build_type=$3
+  local llm=${4:-OFF}
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${ARCH}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-${PLATFORM}-${ARCH}-${backends}-${build_type_lower}.tar.gz"
@@ -106,6 +116,7 @@ build_variant() {
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_VULKAN="${vulkan}" \
+    -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \
     -DET_BUILD_QNN=OFF \
@@ -140,6 +151,13 @@ for variant in "${VARIANTS[@]}"; do
   IFS=':' read -r backends vulkan <<< "$variant"
   build_variant "$backends" "$vulkan" "Release"
   build_variant "$backends" "$vulkan" "Debug"
+done
+
+# Build LLM variants (pure CPU/XNNPACK)
+for variant in "${LLM_VARIANTS[@]}"; do
+  IFS=':' read -r backends vulkan llm <<< "$variant"
+  build_variant "$backends" "$vulkan" "Release" "$llm"
+  build_variant "$backends" "$vulkan" "Debug" "$llm"
 done
 
 echo ""
