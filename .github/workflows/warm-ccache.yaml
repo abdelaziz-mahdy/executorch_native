@@ -41,11 +41,13 @@ concurrency:
   group: warm-ccache
   cancel-in-progress: true
 
-# Match the working caller pattern in release.yaml (reusable workflows started
-# with a startup_failure without these): an explicit permissions block and
-# secrets: inherit on each reusable-workflow job.
+# Match the working caller pattern in release.yaml exactly. The called
+# build-apple/android workflows contain a `release` job that declares
+# `permissions: contents: write`; GitHub validates caller permissions statically
+# at startup (before the `if: inputs.upload_release` that skips that job), so the
+# caller must grant `contents: write` or the run fails with startup_failure.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   warm-apple:
