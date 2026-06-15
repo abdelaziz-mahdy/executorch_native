@@ -46,11 +46,11 @@ jobs:
     # upload_release: false -> builds + saves ccache only, creates no release.
     uses: ./.github/workflows/build-apple.yaml
     with:
-      version: ${{ inputs.version || '1.3.1' }}
+      version: ${{ github.event.inputs.version || '1.3.1' }}
       upload_release: false
 
   warm-android:
     uses: ./.github/workflows/build-android.yaml
     with:
-      version: ${{ inputs.version || '1.3.1' }}
+      version: ${{ github.event.inputs.version || '1.3.1' }}
       upload_release: false
