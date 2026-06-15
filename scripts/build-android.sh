@@ -71,6 +71,15 @@ VARIANTS=(
     "xnnpack-vulkan:ON"
 )
 
+# LLM (text generation) variants — separate from the tensor-only variants above
+# so vision builds don't carry the runner/tokenizers. The variant name MUST match
+# the suffix EXECUTORCH_VARIANT computes (xnnpack + llm), so the package's prebuilt
+# download resolves. Format: name:vulkan:llm
+#  - xnnpack-llm : CPU LLM (pure XNNPACK, builds on every ABI)
+LLM_VARIANTS=(
+    "xnnpack-llm:OFF:ON"
+)
+
 echo "============================================================"
 echo "ExecuTorch Android Build Script"
 echo "============================================================"
@@ -113,6 +122,7 @@ build_variant() {
   local backends=$2
   local vulkan=$3
   local build_type=$4
+  local llm=${5:-OFF}
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${abi}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-${PLATFORM}-${abi}-${backends}-${build_type_lower}.tar.gz"
@@ -120,7 +130,7 @@ build_variant() {
   echo ""
   echo "=== Building ${PLATFORM}-${abi}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
-  echo "  Backends: XNNPACK=ON, Vulkan=${vulkan}"
+  echo "  Backends: XNNPACK=ON, Vulkan=${vulkan}, LLM=${llm}"
 
   # Check Vulkan requirement
   if [ "$vulkan" = "ON" ]; then
@@ -146,6 +156,7 @@ build_variant() {
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \
     -DET_BUILD_VULKAN="${vulkan}" \
+    -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
@@ -190,6 +201,13 @@ for abi in "${ABIS[@]}"; do
     IFS=':' read -r backends vulkan <<< "$variant"
     build_variant "$abi" "$backends" "$vulkan" "Release"
     build_variant "$abi" "$backends" "$vulkan" "Debug"
+  done
+
+  # Build LLM variants for this ABI (pure CPU/XNNPACK)
+  for variant in "${LLM_VARIANTS[@]}"; do
+    IFS=':' read -r backends vulkan llm <<< "$variant"
+    build_variant "$abi" "$backends" "$vulkan" "Release" "$llm"
+    build_variant "$abi" "$backends" "$vulkan" "Debug" "$llm"
   done
 done
 

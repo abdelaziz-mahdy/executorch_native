@@ -53,6 +53,15 @@ $Variants = @(
     @{ Backends = "xnnpack-vulkan"; Vulkan = "ON" }
 )
 
+# LLM (text generation) variants - separate from the tensor-only variants above
+# so vision builds don't carry the runner/tokenizers. The variant name MUST match
+# the suffix EXECUTORCH_VARIANT computes (xnnpack + llm), so the package's prebuilt
+# download resolves.
+#  - xnnpack-llm : CPU LLM (pure XNNPACK)
+$LlmVariants = @(
+    @{ Backends = "xnnpack-llm"; Vulkan = "OFF"; Llm = "ON" }
+)
+
 Write-Host "============================================================"
 Write-Host "ExecuTorch Windows Build Script"
 Write-Host "============================================================"
@@ -77,7 +86,8 @@ function Build-Variant {
         [string]$Arch,
         [string]$Backends,
         [string]$Vulkan,
-        [string]$BuildType
+        [string]$BuildType,
+        [string]$Llm = "OFF"
     )
 
     $BuildTypeLower = $BuildType.ToLower()
@@ -110,6 +120,7 @@ function Build-Variant {
         "-DEXECUTORCH_CACHE_DIR=$CacheDir" `
         -DET_BUILD_XNNPACK=ON `
         -DET_BUILD_VULKAN=$Vulkan `
+        -DET_BUILD_LLM=$Llm `
         -DET_BUILD_COREML=OFF `
         -DET_BUILD_MPS=OFF `
         -DET_BUILD_QNN=OFF `
@@ -151,6 +162,12 @@ foreach ($Arch in $Architectures) {
     foreach ($Variant in $Variants) {
         Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Release"
         Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Debug"
+    }
+
+    # Build LLM variants (pure CPU/XNNPACK)
+    foreach ($Variant in $LlmVariants) {
+        Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Release" -Llm $Variant.Llm
+        Build-Variant -Arch $Arch -Backends $Variant.Backends -Vulkan $Variant.Vulkan -BuildType "Debug" -Llm $Variant.Llm
     }
 }
 

@@ -41,7 +41,7 @@ endif()
 
 # Prebuilt release version (our release tag for prebuilt downloads)
 if(NOT DEFINED EXECUTORCH_PREBUILT_VERSION OR "${EXECUTORCH_PREBUILT_VERSION}" STREQUAL "")
-    set(EXECUTORCH_PREBUILT_VERSION "1.3.1.3" CACHE STRING "Prebuilt release version" FORCE)
+    set(EXECUTORCH_PREBUILT_VERSION "1.3.1.4" CACHE STRING "Prebuilt release version" FORCE)
 else()
     set(EXECUTORCH_PREBUILT_VERSION "${EXECUTORCH_PREBUILT_VERSION}" CACHE STRING "Prebuilt release version" FORCE)
 endif()
@@ -65,16 +65,41 @@ option(ET_BUILD_XNNPACK "Build with XNNPACK backend" ON)
 option(ET_BUILD_COREML "Build with CoreML backend" OFF)
 option(ET_BUILD_MPS "Build with MPS backend" OFF)
 option(ET_BUILD_METAL "Build with Metal backend (macOS)" OFF)
+option(ET_BUILD_MLX "Build with MLX backend (Apple Silicon GPU, macOS)" OFF)
 option(ET_BUILD_VULKAN "Build with Vulkan backend" OFF)
 option(ET_BUILD_QNN "Build with QNN backend" OFF)
+# LLM (text generation) runner FFI. OFF by default so existing tensor-only
+# prebuilt builds are unaffected. Requires a source build (or a prebuilt that
+# bundles libextension_llm_runner + libtokenizers) — see build_from_source.cmake.
+option(ET_BUILD_LLM "Build with LLM (text generation) runner FFI" OFF)
+option(ET_BUILD_LLM_HARNESS "Build the standalone LLM validation harness" OFF)
 
 # Platform-specific defaults.
 # CoreML is enabled on all Apple platforms. The deprecated MPS backend is
 # replaced by the new Metal backend, which is macOS-desktop-only (not iOS).
+# These default ON for Apple but respect an explicit OFF (the Flutter hook
+# passes ET_BUILD_* values derived from the `backends:` list — e.g. an
+# xnnpack-only LLM build must be able to keep CoreML/Metal off).
 if(APPLE)
-    set(ET_BUILD_COREML ON CACHE BOOL "Build with CoreML backend" FORCE)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+    if(ET_BUILD_COREML)
+        set(ET_BUILD_COREML ON CACHE BOOL "Build with CoreML backend" FORCE)
+    endif()
+    if(ET_BUILD_METAL AND CMAKE_SYSTEM_NAME STREQUAL "Darwin"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
         set(ET_BUILD_METAL ON CACHE BOOL "Build with Metal backend" FORCE)
+    endif()
+    # MLX is Apple-Silicon (arm64) macOS-desktop only. Detect arm64 robustly:
+    # under the native_toolchain_cmake ios.toolchain (PLATFORM=MAC_ARM64),
+    # CMAKE_SYSTEM_PROCESSOR is NOT "arm64" — the reliable signals are
+    # CMAKE_OSX_ARCHITECTURES / PLATFORM (and host CMAKE_SYSTEM_PROCESSOR for a
+    # plain build). Matching only CMAKE_SYSTEM_PROCESSOR silently forced MLX OFF.
+    if(ET_BUILD_MLX AND (
+           CMAKE_OSX_ARCHITECTURES MATCHES "arm64"
+           OR PLATFORM MATCHES "MAC_ARM64"
+           OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64"))
+        set(ET_BUILD_MLX ON CACHE BOOL "Build with MLX backend" FORCE)
+    else()
+        set(ET_BUILD_MLX OFF CACHE BOOL "Build with MLX backend" FORCE)
     endif()
 endif()
 
@@ -109,11 +134,21 @@ endif()
 if(ET_BUILD_METAL)
     list(APPEND _variant_parts "metal")
 endif()
+if(ET_BUILD_MLX)
+    list(APPEND _variant_parts "mlx")
+endif()
 if(ET_BUILD_VULKAN)
     list(APPEND _variant_parts "vulkan")
 endif()
 if(ET_BUILD_QNN)
     list(APPEND _variant_parts "qnn")
+endif()
+# LLM (text generation) runner is a distinct prebuilt variant — it adds the
+# runner + tokenizers (+ for MLX, the delegate), so it ships separately from the
+# tensor-only variants to avoid bloating vision builds. Suffix keeps the selected
+# prebuilt name aligned with the build scripts (e.g. xnnpack-llm, xnnpack-mlx-llm).
+if(ET_BUILD_LLM)
+    list(APPEND _variant_parts "llm")
 endif()
 
 string(JOIN "-" EXECUTORCH_VARIANT ${_variant_parts})
@@ -178,6 +213,12 @@ message(STATUS "  Architecture: ${EXECUTORCH_ARCH}")
 # ============================================================================
 
 if(EXECUTORCH_BUILD_MODE STREQUAL "prebuilt")
+    # LLM builds download a dedicated prebuilt variant (e.g. xnnpack-llm,
+    # xnnpack-mlx-llm) — the "llm" suffix is part of EXECUTORCH_VARIANT above, so
+    # download_prebuilt fetches the right archive. If that variant isn't published
+    # for this platform yet, the download below fails with a clear 404; build from
+    # source (EXECUTORCH_BUILD_MODE=source) as a fallback.
+
     # Download pre-built FFI library - no compilation needed
     include(cmake/download_prebuilt.cmake)
 
@@ -236,6 +277,13 @@ set(HEADERS
     src/executorch_ffi.h
 )
 
+# LLM runner FFI is compiled only when enabled (keeps tensor-only builds intact).
+if(ET_BUILD_LLM)
+    list(APPEND SOURCES src/executorch_llm_ffi.cpp)
+    list(APPEND HEADERS src/executorch_llm_ffi.h)
+    message(STATUS "  LLM runner FFI: ENABLED")
+endif()
+
 add_library(${PROJECT_NAME} SHARED ${SOURCES} ${HEADERS})
 
 # Export definition
@@ -269,8 +317,10 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     ET_BUILD_COREML=$<BOOL:${ET_BUILD_COREML}>
     ET_BUILD_MPS=$<BOOL:${ET_BUILD_MPS}>
     ET_BUILD_METAL=$<BOOL:${ET_BUILD_METAL}>
+    ET_BUILD_MLX=$<BOOL:${ET_BUILD_MLX}>
     ET_BUILD_VULKAN=$<BOOL:${ET_BUILD_VULKAN}>
     ET_BUILD_QNN=$<BOOL:${ET_BUILD_QNN}>
+    ET_BUILD_LLM=$<BOOL:${ET_BUILD_LLM}>
 )
 
 # ============================================================================
@@ -344,6 +394,41 @@ if(NOT WIN32)
         # For Intel Macs, this ensures compatibility
         target_link_options(${PROJECT_NAME} PRIVATE "-Wl,-segalign,0x4000")
         message(STATUS "  16KB page alignment: enabled (Mach-O)")
+    endif()
+endif()
+
+# ============================================================================
+# LLM Validation Harness (optional, Phase 1)
+# ============================================================================
+# Standalone executable that streams generation to stdout to validate the LLM
+# runner end-to-end without Dart. Links the FFI shared library.
+if(ET_BUILD_LLM AND ET_BUILD_LLM_HARNESS)
+    add_executable(llm_harness test/llm_harness.cpp)
+    target_include_directories(llm_harness PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(llm_harness PRIVATE ${PROJECT_NAME})
+    message(STATUS "  LLM harness: ENABLED (target: llm_harness)")
+endif()
+
+# ============================================================================
+# MLX Metal kernels (mlx.metallib)
+# ============================================================================
+# MLX locates its Metal kernel library at runtime via dladdr() on the binary
+# that contains MLX code (our FFI dylib), then looks for `mlx.metallib` in that
+# same directory. So the metallib must sit next to libexecutorch_ffi.dylib both
+# in the build tree (for the standalone harness) and in the install tree (so the
+# Flutter native-assets bundler ships it alongside the dylib).
+#
+# MLX_METALLIB_PATH is set as an INTERNAL cache var by backends/mlx/CMakeLists.txt.
+if(ET_BUILD_MLX)
+    # Build-tree colocation (POST_BUILD copy next to the dylib).
+    executorch_target_copy_mlx_metallib(${PROJECT_NAME})
+    # Install-tree colocation.
+    if(DEFINED MLX_METALLIB_PATH AND EXISTS "${MLX_METALLIB_PATH}")
+        install(FILES "${MLX_METALLIB_PATH}" DESTINATION lib)
+        message(STATUS "  MLX metallib: ${MLX_METALLIB_PATH}")
+    else()
+        message(WARNING "ET_BUILD_MLX is ON but MLX_METALLIB_PATH is unset/missing "
+                        "(got '${MLX_METALLIB_PATH}'); mlx.metallib will not be bundled.")
     endif()
 endif()
 
