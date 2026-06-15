@@ -116,6 +116,11 @@ build_device_variant() {
   local arch="arm64"
   local build_dir="${PROJECT_DIR}/build-ios-${arch}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-ios-${arch}-${backends}-${build_type_lower}.tar.gz"
+  # COMPILE-ONCE / LINK-MANY (executorch_native#6): variants of the same
+  # (sdk, arch, build_type) share one ExecuTorch sub-build so ccache serves the
+  # ET-core objects across backend variants instead of recompiling per variant.
+  # Device and simulator use different SDKs -> different keys (handled by prefix).
+  local shared_et_dir="${PROJECT_DIR}/.et-shared/ios-${arch}-${build_type_lower}-d13"
 
   echo ""
   echo "=== Building ios-${arch}-${backends}-${build_type_lower} (device) ==="
@@ -145,6 +150,7 @@ build_device_variant() {
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
+    -DEXECUTORCH_SHARED_BINARY_DIR="${shared_et_dir}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_VULKAN="${vulkan}" \
@@ -178,6 +184,10 @@ build_simulator_variant() {
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-ios-simulator-${arch}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-ios-simulator-${arch}-${backends}-${build_type_lower}.tar.gz"
+  # COMPILE-ONCE / LINK-MANY (executorch_native#6): simulator variants share one
+  # ExecuTorch sub-build per (arch, build_type). The simulator SDK differs from
+  # the device SDK, so this key is distinct from the device build's shared dir.
+  local shared_et_dir="${PROJECT_DIR}/.et-shared/ios-simulator-${arch}-${build_type_lower}-d13"
 
   echo ""
   echo "=== Building ios-simulator-${arch}-${backends}-${build_type_lower} ==="
@@ -207,6 +217,7 @@ build_simulator_variant() {
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
+    -DEXECUTORCH_SHARED_BINARY_DIR="${shared_et_dir}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_VULKAN="${vulkan}" \

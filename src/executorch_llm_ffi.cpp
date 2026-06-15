@@ -398,11 +398,22 @@ ET_API void et_llm_set_metallib_path(const char* path) {
     // ET_MLX_METALLIB_PATH first. Set it so MLX can find mlx.metallib at a
     // sandbox-readable location (Flutter ships it as a data asset; Dart copies it
     // to a writable dir and passes the path here before creating the runner).
+    // setenv/unsetenv are POSIX; MSVC only has _putenv_s (an empty value
+    // effectively unsets). MLX is Apple-only so this never matters on Windows,
+    // but the symbol must still compile there.
     if (path && path[0] != '\0') {
+#ifdef _WIN32
+        _putenv_s("ET_MLX_METALLIB_PATH", path);
+#else
         setenv("ET_MLX_METALLIB_PATH", path, /*overwrite=*/1);
+#endif
         ETLLM_LOG("ET_MLX_METALLIB_PATH set to %s", path);
     } else {
+#ifdef _WIN32
+        _putenv_s("ET_MLX_METALLIB_PATH", "");
+#else
         unsetenv("ET_MLX_METALLIB_PATH");
+#endif
     }
 }
 

@@ -126,6 +126,11 @@ build_variant() {
   local build_type_lower=$(echo "$build_type" | tr '[:upper:]' '[:lower:]')
   local build_dir="${PROJECT_DIR}/build-${PLATFORM}-${abi}-${backends}-${build_type_lower}"
   local artifact_name="libexecutorch_ffi-${PLATFORM}-${abi}-${backends}-${build_type_lower}.tar.gz"
+  # COMPILE-ONCE / LINK-MANY (executorch_native#6): variants of the same
+  # (abi, build_type) share one ExecuTorch sub-build so the first variant
+  # compiles ExecuTorch and the rest reuse it (ninja incremental + ccache).
+  # Each ABI is a different target arch, so it gets its own shared dir.
+  local shared_et_dir="${PROJECT_DIR}/.et-shared/${PLATFORM}-${abi}-${build_type_lower}"
 
   echo ""
   echo "=== Building ${PLATFORM}-${abi}-${backends}-${build_type_lower} ==="
@@ -152,6 +157,7 @@ build_variant() {
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
+    -DEXECUTORCH_SHARED_BINARY_DIR="${shared_et_dir}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \

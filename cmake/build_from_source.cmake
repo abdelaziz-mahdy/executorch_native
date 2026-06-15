@@ -46,7 +46,31 @@ if(DEFINED EXECUTORCH_CACHE_DIR AND NOT "${EXECUTORCH_CACHE_DIR}" STREQUAL "")
 else()
     set(executorch_SOURCE_DIR ${CMAKE_BINARY_DIR}/executorch)
 endif()
-set(executorch_BINARY_DIR ${CMAKE_BINARY_DIR}/_deps/executorch_fetch-build)
+
+# ExecuTorch sub-build binary directory.
+#
+# COMPILE-ONCE / LINK-MANY (executorch_native#6): by default each shipped variant
+# (xnnpack, xnnpack-coreml, xnnpack-metal, ...) builds ExecuTorch from scratch in
+# its OWN per-variant tree. The variant name lives inside the ExecuTorch
+# generated-header `-I` paths, so even though the source + flags match across
+# variants, ccache sees different command lines and MISSES — every backend variant
+# recompiles all of ExecuTorch (measured: ~41% intra-run hits, ~hours per release).
+#
+# When EXECUTORCH_SHARED_BINARY_DIR is passed, all variants that share a
+# (platform, arch, build_type, deployment-target) key point ExecuTorch's sub-build
+# at ONE shared directory. The paths in every compile command then become
+# identical across variants, so the first variant compiles ExecuTorch once and the
+# rest are served from ccache (the wrapper itself still links only its own backend
+# subset, so each shipped library stays slim). Different deployment targets
+# (e.g. MLX needs macOS 14 vs 11 elsewhere) MUST use distinct shared dirs, or the
+# `-mmacosx-version-min` flag change defeats the cache — the build scripts key the
+# path on the deployment class for exactly this reason.
+if(DEFINED EXECUTORCH_SHARED_BINARY_DIR AND NOT "${EXECUTORCH_SHARED_BINARY_DIR}" STREQUAL "")
+    file(TO_CMAKE_PATH "${EXECUTORCH_SHARED_BINARY_DIR}" executorch_BINARY_DIR)
+    message(STATUS "Using SHARED ExecuTorch binary dir (compile-once/link-many): ${executorch_BINARY_DIR}")
+else()
+    set(executorch_BINARY_DIR ${CMAKE_BINARY_DIR}/_deps/executorch_fetch-build)
+endif()
 
 # ExecuTorch build options (must be set before FetchContent_MakeAvailable)
 set(EXECUTORCH_BUILD_HOST_TARGETS ON CACHE BOOL "Build host targets" FORCE)
@@ -164,15 +188,23 @@ endif()
 if(ET_BUILD_MLX AND APPLE)
     set(EXECUTORCH_BUILD_MLX ON CACHE BOOL "Build MLX backend" FORCE)
     set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
-    # MLX requires macOS 14.0+. native_toolchain_cmake passes DEPLOYMENT_TARGET
-    # from codeConfig.macOS.targetVersion (Flutter default = 13), and the MLX
-    # CMakeLists checks DEPLOYMENT_TARGET (NOT CMAKE_OSX_DEPLOYMENT_TARGET) and
-    # FATAL_ERRORs below 14.0. Force both to 14.0 here, before add_subdirectory:
-    # this both satisfies the check and ensures every ET/MLX target compiles for
-    # macOS 14 (so MLX's 14-only Metal APIs are available). The example app's
-    # macOS deployment target must match (raised to 14.0).
-    set(DEPLOYMENT_TARGET "14.0" CACHE STRING "MLX requires macOS 14+" FORCE)
+    # MLX requires macOS 14.0+. backends/mlx/CMakeLists.txt picks its minimum from
+    # ONE of three branches, and which one fires depends on how the build is driven:
+    #   1. ios.toolchain macOS (PLATFORM matches ^MAC)            -> checks DEPLOYMENT_TARGET, min 14
+    #   2. ios.toolchain iOS/etc (DEPLOYMENT_TARGET set, not MAC) -> min 17
+    #   3. plain macOS (only CMAKE_OSX_DEPLOYMENT_TARGET set)     -> min 14
+    # Flutter builds via native_toolchain_cmake (ios.toolchain, PLATFORM=MAC_ARM64,
+    # DEPLOYMENT_TARGET defaulting to 13) take branch 1, so we must raise
+    # DEPLOYMENT_TARGET to 14. The CI build-macos.sh path is a PLAIN macOS build
+    # with NO PLATFORM — there, setting DEPLOYMENT_TARGET wrongly trips branch 2
+    # (the iOS path, min 17) and FATAL_ERRORs at 14. So only set DEPLOYMENT_TARGET
+    # when the ios.toolchain macOS path is active; otherwise rely on branch 3 via
+    # CMAKE_OSX_DEPLOYMENT_TARGET alone. Both are forced before add_subdirectory so
+    # every ET/MLX target also compiles for macOS 14 (MLX's 14-only Metal APIs).
     set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "MLX requires macOS 14+" FORCE)
+    if(PLATFORM MATCHES "^MAC")
+        set(DEPLOYMENT_TARGET "14.0" CACHE STRING "MLX requires macOS 14+" FORCE)
+    endif()
 else()
     set(EXECUTORCH_BUILD_MLX OFF CACHE BOOL "Build MLX backend" FORCE)
 endif()
@@ -528,6 +560,20 @@ endif()
 if(ET_BUILD_LLM AND APPLE)
     set(CMAKE_MACOSX_BUNDLE OFF CACHE BOOL "" FORCE)
     message(STATUS "LLM build: CMAKE_MACOSX_BUNDLE forced OFF (sentencepiece tools)")
+
+    # sentencepiece's src/CMakeLists.txt calls set_xcode_property() on its CLI
+    # tools (spm_encode/decode/...) under `if(CMAKE_SYSTEM_NAME STREQUAL "iOS")`,
+    # but THIS sentencepiece version never defines that macro — so an iOS build
+    # dies at configure with `Unknown CMake command "set_xcode_property"` (macOS
+    # skips the block, which is why only iOS failed). The calls only set
+    # PRODUCT_BUNDLE_IDENTIFIER on command-line tools we never ship, so define a
+    # no-op macro (macros are global once defined, so it is in scope when
+    # sentencepiece is processed inside add_subdirectory below).
+    if(NOT COMMAND set_xcode_property)
+        macro(set_xcode_property)
+        endmacro()
+        message(STATUS "LLM build: defined no-op set_xcode_property (sentencepiece iOS)")
+    endif()
 endif()
 
 # The MLX delegate builds MLX from the backends/mlx/third-party/mlx submodule and

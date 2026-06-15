@@ -255,6 +255,15 @@ build_variant() {
   local deploy=11.0
   [ "$mlx" = "ON" ] && deploy=14.0
 
+  # COMPILE-ONCE / LINK-MANY (executorch_native#6): all variants that share the
+  # same (arch, build_type, deployment-target) compile ExecuTorch into ONE shared
+  # sub-build directory, so the first variant compiles it and the rest hit ccache
+  # (the variant's wrapper still links only its own backend subset). MLX's 14.0
+  # deployment target gets its own shared dir so the version-min flag change does
+  # not invalidate the 11.0 cache.
+  local et_class="d${deploy%%.*}"
+  local shared_et_dir="${PROJECT_DIR}/.et-shared/${PLATFORM}-${arch}-${build_type_lower}-${et_class}"
+
   echo ""
   echo "=== Building ${PLATFORM}-${arch}-${backends}-${build_type_lower} ==="
   echo "  Build directory: ${build_dir}"
@@ -278,6 +287,7 @@ build_variant() {
     -DEXECUTORCH_VERSION="${VERSION}" \
     -DEXECUTORCH_BUILD_MODE=source \
     -DEXECUTORCH_CACHE_DIR="${CACHE_DIR}" \
+    -DEXECUTORCH_SHARED_BINARY_DIR="${shared_et_dir}" \
     -DET_BUILD_XNNPACK=ON \
     -DET_BUILD_COREML="${coreml}" \
     -DET_BUILD_METAL="${metal}" \

@@ -30,9 +30,15 @@ concurrency:
 # object files instead of recompiling all of ExecuTorch from scratch.
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_MAXSIZE: 2G
+  # macOS/iOS carry the most variants; size up so the cross-run (warm-on-main)
+  # cache isn't self-evicted mid-build. Mind the 10 GB per-repo Actions cache cap.
+  CCACHE_MAXSIZE: 5G
   CCACHE_COMPILERCHECK: content
   CCACHE_BASEDIR: ${{ github.workspace }}
+  # Don't hash the build dir into the cache key: Debug (-g) builds embed the CWD,
+  # which otherwise defeats cross-variant/cross-run reuse even with the shared
+  # ExecuTorch sub-build dir (compile-once/link-many).
+  CCACHE_NOHASHDIR: "true"
   CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines
 
 jobs:
