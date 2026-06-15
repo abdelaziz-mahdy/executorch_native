@@ -492,6 +492,35 @@ if(EXECUTORCH_BUILD_VULKAN)
     endif()
 endif()
 
+# The LLM runner pulls in the tokenizers library, which lives in the
+# extension/llm/tokenizers GIT SUBMODULE (and has its OWN nested submodules:
+# sentencepiece, re2, abseil, pcre2, json, ...). FetchContent only clones the
+# submodules listed at clone time (the _core_submodules above), so a fresh CI
+# clone is missing it and configure dies with "add_subdirectory ... does not
+# contain a CMakeLists.txt: extension/llm/tokenizers". Init it (recursively) on
+# demand, the same way the MLX/eigen submodules are handled below.
+if(ET_BUILD_LLM)
+    set(_tokenizers_dir "${executorch_SOURCE_DIR}/extension/llm/tokenizers")
+    if(NOT EXISTS "${_tokenizers_dir}/CMakeLists.txt")
+        message(STATUS "LLM tokenizers submodule missing, fetching (recursive)...")
+        execute_process(
+            COMMAND git submodule update --init --recursive extension/llm/tokenizers
+            WORKING_DIRECTORY ${executorch_SOURCE_DIR}
+            RESULT_VARIABLE _tokenizers_result
+        )
+        if(NOT _tokenizers_result EQUAL 0
+           OR NOT EXISTS "${_tokenizers_dir}/CMakeLists.txt")
+            message(FATAL_ERROR
+                "Failed to initialize the tokenizers submodule at ${_tokenizers_dir}.\n"
+                "Run manually: cd ${executorch_SOURCE_DIR} && "
+                "git submodule update --init --recursive extension/llm/tokenizers")
+        endif()
+        message(STATUS "LLM tokenizers submodule fetched successfully")
+    else()
+        message(STATUS "LLM tokenizers submodule present at ${_tokenizers_dir}")
+    endif()
+endif()
+
 # Sentencepiece (pulled in by the LLM tokenizers library) marks its CLI tools
 # (spm_encode, spm_train, ...) as MACOSX_BUNDLE under the Xcode generator, and
 # their install() rules then fail configure with "no BUNDLE DESTINATION". We build
