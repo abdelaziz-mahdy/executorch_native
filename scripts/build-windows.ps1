@@ -129,7 +129,13 @@ function Build-Variant {
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 
     # Build
-    cmake --build $BuildDir --config $BuildType --parallel
+    # /p:TrackFileAccess=false disables MSBuild's FileTracker. The LLM tokenizers
+    # pull in abseil, whose deeply nested target dirs (…\tokenizers\third-party\
+    # abseil-cpp\absl\random\…test_util.dir\Release\…) overflow Windows' 260-char
+    # MAX_PATH once FileTracker appends its `.tlog\clang-cl.NNNN.read.1.tlog`
+    # paths, failing the build with `FileTracker : error FTK1011`. CI does clean
+    # builds, so the tracker's incremental bookkeeping isn't needed.
+    cmake --build $BuildDir --config $BuildType --parallel -- /p:TrackFileAccess=false
     if ($LASTEXITCODE -ne 0) { throw "CMake build failed" }
 
     # Install
