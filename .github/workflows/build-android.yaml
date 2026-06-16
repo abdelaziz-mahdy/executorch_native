@@ -30,14 +30,9 @@ concurrency:
 # object files instead of recompiling all of ExecuTorch from scratch.
 env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
-  # Android builds 4 ABIs; size up so the cross-run (warm-on-main) cache isn't
-  # self-evicted mid-build. Mind the 10 GB per-repo Actions cache cap.
-  CCACHE_MAXSIZE: 5G
+  CCACHE_MAXSIZE: 3G
   CCACHE_COMPILERCHECK: content
   CCACHE_BASEDIR: ${{ github.workspace }}
-  # Don't hash the build dir into the cache key (Debug -g embeds the CWD), which
-  # otherwise defeats cross-variant/cross-run reuse despite the shared ET dir.
-  CCACHE_NOHASHDIR: "true"
   CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines
 
 jobs:
