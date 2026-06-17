@@ -128,8 +128,15 @@ function Build-Variant {
     # CMAKE_*_COMPILER_LAUNCHER (ccache) — the VS/MSBuild generator ignored it — and
     # supports the shared sub-build dir; it also avoids MSBuild FileTracker, so the
     # abseil MAX_PATH/.tlog (FTK1011) overflow no longer occurs.
+    # NB: every -D flag carrying a $variable MUST be double-quoted. PowerShell does
+    # NOT expand the variable in the bareword form `-Dfoo=$var` (it reaches CMake as
+    # the literal "$var"). The VS generator tolerated that (it ignores
+    # CMAKE_BUILD_TYPE, and a literal "$Vulkan"/"$Llm" reads as truthy so every
+    # variant silently got Vulkan+LLM), but Ninja writes the build type into rule
+    # names and dies on the `$`. Quoting forces expansion AND makes the per-variant
+    # backend selection correct.
     cmake -B $BuildDir -S $ProjectDir -G Ninja `
-        -DCMAKE_BUILD_TYPE=$BuildType `
+        "-DCMAKE_BUILD_TYPE=$BuildType" `
         "-DCMAKE_C_COMPILER=$ClangCl" `
         "-DCMAKE_CXX_COMPILER=$ClangCl" `
         "-DEXECUTORCH_VERSION:STRING=$Version" `
@@ -137,8 +144,8 @@ function Build-Variant {
         "-DEXECUTORCH_CACHE_DIR=$CacheDir" `
         "-DEXECUTORCH_SHARED_BINARY_DIR=$SharedEtDir" `
         -DET_BUILD_XNNPACK=ON `
-        -DET_BUILD_VULKAN=$Vulkan `
-        -DET_BUILD_LLM=$Llm `
+        "-DET_BUILD_VULKAN=$Vulkan" `
+        "-DET_BUILD_LLM=$Llm" `
         -DET_BUILD_COREML=OFF `
         -DET_BUILD_MPS=OFF `
         -DET_BUILD_QNN=OFF `
