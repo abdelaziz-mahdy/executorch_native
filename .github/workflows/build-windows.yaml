@@ -93,6 +93,14 @@ jobs:
           & glslc --version
           echo "glslc verified successfully"
 
+      # Ninja + clang-cl (replacing the VS/MSBuild generator) need the MSVC x64
+      # toolchain environment (link.exe, Windows SDK, INCLUDE/LIB) on PATH. The VS
+      # generator set this up implicitly; with Ninja we activate it explicitly.
+      - name: Set up MSVC developer environment (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Run build script
         shell: pwsh
         run: |

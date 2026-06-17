@@ -78,6 +78,14 @@ function Install-Dependencies {
     # Install Python dependencies
     pip install pyyaml torch --extra-index-url https://download.pytorch.org/whl/cpu
 
+    # Ninja (single-config generator). pip drops ninja.exe on PATH (Python Scripts
+    # dir). We moved off the Visual Studio/MSBuild generator because it ignores
+    # CMAKE_*_COMPILER_LAUNCHER (so ccache never engaged) and rebuilt all of
+    # ExecuTorch per variant; Ninja honors the launcher AND lets variants share one
+    # ExecuTorch sub-build (EXECUTORCH_SHARED_BINARY_DIR), and it doesn't use
+    # MSBuild's FileTracker so the abseil MAX_PATH/.tlog overflow goes away too.
+    pip install ninja
+
     Write-Host "Dependencies installed successfully"
 }
 
@@ -110,36 +118,40 @@ function Build-Variant {
         Write-Host "  Vulkan: enabled (glslc found)"
     }
 
-    # Configure
-    cmake -B $BuildDir -S $ProjectDir `
-        -A $Arch `
-        -T ClangCL `
+    # COMPILE-ONCE / LINK-MANY (executorch_native#6): x64 variants of the same
+    # build_type share ONE ExecuTorch sub-build, so ExecuTorch is compiled once per
+    # build_type (Release/Debug) instead of once per variant. Works because Ninja is
+    # a single-config generator that does proper incremental reuse (+ honors ccache).
+    $SharedEtDir = "$ProjectDir\.et-shared\windows-$ArchLower-$BuildTypeLower"
+
+    # Configure with Ninja + clang-cl ($ClangCl discovered in Main). Ninja honors
+    # CMAKE_*_COMPILER_LAUNCHER (ccache) — the VS/MSBuild generator ignored it — and
+    # supports the shared sub-build dir; it also avoids MSBuild FileTracker, so the
+    # abseil MAX_PATH/.tlog (FTK1011) overflow no longer occurs.
+    cmake -B $BuildDir -S $ProjectDir -G Ninja `
         -DCMAKE_BUILD_TYPE=$BuildType `
+        "-DCMAKE_C_COMPILER=$ClangCl" `
+        "-DCMAKE_CXX_COMPILER=$ClangCl" `
         "-DEXECUTORCH_VERSION:STRING=$Version" `
         -DEXECUTORCH_BUILD_MODE=source `
         "-DEXECUTORCH_CACHE_DIR=$CacheDir" `
+        "-DEXECUTORCH_SHARED_BINARY_DIR=$SharedEtDir" `
         -DET_BUILD_XNNPACK=ON `
         -DET_BUILD_VULKAN=$Vulkan `
         -DET_BUILD_LLM=$Llm `
         -DET_BUILD_COREML=OFF `
         -DET_BUILD_MPS=OFF `
         -DET_BUILD_QNN=OFF `
-        -DCMAKE_INSTALL_PREFIX="$BuildDir\install"
+        "-DCMAKE_INSTALL_PREFIX=$BuildDir\install"
 
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 
-    # Build
-    # /p:TrackFileAccess=false disables MSBuild's FileTracker. The LLM tokenizers
-    # pull in abseil, whose deeply nested target dirs (…\tokenizers\third-party\
-    # abseil-cpp\absl\random\…test_util.dir\Release\…) overflow Windows' 260-char
-    # MAX_PATH once FileTracker appends its `.tlog\clang-cl.NNNN.read.1.tlog`
-    # paths, failing the build with `FileTracker : error FTK1011`. CI does clean
-    # builds, so the tracker's incremental bookkeeping isn't needed.
-    cmake --build $BuildDir --config $BuildType --parallel -- /p:TrackFileAccess=false
+    # Build (Ninja is single-config — build type came from CMAKE_BUILD_TYPE above)
+    cmake --build $BuildDir --parallel
     if ($LASTEXITCODE -ne 0) { throw "CMake build failed" }
 
     # Install
-    cmake --install $BuildDir --config $BuildType
+    cmake --install $BuildDir
     if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
 
     # Package
@@ -157,6 +169,18 @@ Install-Dependencies
 
 # Create dist directory
 New-Item -ItemType Directory -Force -Path dist | Out-Null
+
+# Locate clang-cl. Ninja needs an explicit compiler (the VS generator selected it
+# implicitly via -T ClangCL). clang-cl ships with the VS "C++ Clang tools for
+# Windows" component; find the install via vswhere. The MSVC dev environment
+# (set up in the workflow) supplies link.exe + the Windows SDK that clang-cl uses.
+$VsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$VsPath = & $VsWhere -latest -property installationPath
+$ClangCl = Join-Path $VsPath "VC\Tools\Llvm\x64\bin\clang-cl.exe"
+if (-not (Test-Path $ClangCl)) {
+    throw "clang-cl not found at $ClangCl (VS 'C++ Clang tools for Windows' component required)"
+}
+Write-Host "Using clang-cl: $ClangCl"
 
 # Build all architecture and variant combinations
 foreach ($Arch in $Architectures) {
