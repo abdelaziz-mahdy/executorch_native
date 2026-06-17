@@ -22,13 +22,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
-# Android ABIs to build (all supported architectures)
-ABIS=(
-  "arm64-v8a"
-  "armeabi-v7a"
-  "x86_64"
-  "x86"
-)
+# Android ABIs to build (all supported architectures). Each ABI is an independent
+# cross-compile (own build dir + own .et-shared sub-build, no shared state), so CI
+# parallelizes them across jobs by setting ANDROID_ABIS (space-separated) to one
+# ABI per job. Unset = build all four (standalone/local use).
+if [ -n "${ANDROID_ABIS:-}" ]; then
+  read -ra ABIS <<< "${ANDROID_ABIS}"
+else
+  ABIS=(
+    "arm64-v8a"
+    "armeabi-v7a"
+    "x86_64"
+    "x86"
+  )
+fi
 
 # Check for glslc availability (needed for Vulkan shader compilation)
 # Prefer Vulkan SDK glslc over NDK's - the NDK's glslc does not support

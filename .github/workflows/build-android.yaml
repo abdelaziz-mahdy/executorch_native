@@ -39,7 +39,15 @@ jobs:
   build:
     # Use ubuntu-22.04 for Vulkan SDK compatibility (jammy packages)
     runs-on: ubuntu-22.04
-    name: Android (all ABIs, all variants)
+    name: Android ${{ matrix.abi }}
+    # Each ABI is an independent cross-compile (own build dir + own .et-shared
+    # sub-build, no shared state), so we fan them out across parallel jobs instead
+    # of building all four sequentially in one ~2h job. fail-fast: false so one
+    # ABI's failure doesn't cancel the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a, x86_64, x86]
 
     steps:
       - name: Checkout
@@ -57,9 +65,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-android-${{ github.run_id }}
+          key: ccache-android-${{ matrix.abi }}-${{ github.run_id }}
           restore-keys: |
-            ccache-android-
+            ccache-android-${{ matrix.abi }}-
 
       - name: Setup Android NDK
         run: |
@@ -94,6 +102,9 @@ jobs:
           echo "glslc verified successfully"
 
       - name: Run build script
+        # ANDROID_ABIS limits the script to just this matrix job's ABI.
+        env:
+          ANDROID_ABIS: ${{ matrix.abi }}
         run: |
           chmod +x scripts/build-android.sh
           ./scripts/build-android.sh "${{ inputs.version }}"
@@ -105,7 +116,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-all
+          # Unique per ABI so the parallel matrix jobs don't clobber each other.
+          name: android-${{ matrix.abi }}
           path: dist/*.tar.gz
           retention-days: 7
 
