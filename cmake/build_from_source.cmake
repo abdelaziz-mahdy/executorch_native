@@ -708,6 +708,26 @@ endif()
 set(FLATCC_ALLOW_WERROR OFF CACHE BOOL "Disable flatcc -Werror" FORCE)
 add_compile_options(-Wno-error)
 
+# Windows + Ninja: ExecuTorch builds the flatc/flatcc host compilers via
+# ExternalProject and declares their BUILD_BYPRODUCTS WITHOUT the executable
+# suffix (`<INSTALL_DIR>/bin/flatc`). On Windows the produced file is `flatc.exe`,
+# so a Ninja build of the schema codegen (which depends on flatc.exe) fails with
+# "flatc.exe ... missing and no known rule to make it". (The Visual Studio
+# generator used target-level deps and didn't care; non-Windows exes have no
+# suffix so the byproduct matched.) Append .exe to the byproducts so Ninja knows
+# the rule produces them. Idempotent + CRLF-tolerant.
+if(WIN32)
+    set(_et_thirdparty_cml "${executorch_SOURCE_DIR}/third-party/CMakeLists.txt")
+    if(EXISTS "${_et_thirdparty_cml}")
+        file(READ "${_et_thirdparty_cml}" _et_tp_content)
+        string(REGEX REPLACE
+            "(/bin/flatcc?)(\r?\n)" "\\1.exe\\2"
+            _et_tp_content "${_et_tp_content}")
+        file(WRITE "${_et_thirdparty_cml}" "${_et_tp_content}")
+        message(STATUS "Windows: patched flatc/flatcc BUILD_BYPRODUCTS with .exe (Ninja)")
+    endif()
+endif()
+
 # Add ExecuTorch as subdirectory - now our variables are guaranteed to be set first
 message(STATUS "Adding ExecuTorch as subdirectory...")
 message(STATUS "  EXECUTORCH_BUILD_VULKAN: ${EXECUTORCH_BUILD_VULKAN}")
