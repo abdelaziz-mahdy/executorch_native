@@ -97,6 +97,11 @@ static size_t dtype_size(ETDType dtype) {
         case ET_DTYPE_INT8: return 1;
         case ET_DTYPE_UINT8: return 1;
         case ET_DTYPE_BOOL: return 1;
+        case ET_DTYPE_UINT16: return 2;
+        case ET_DTYPE_UINT32: return 4;
+        case ET_DTYPE_UINT64: return 8;
+        case ET_DTYPE_FLOAT16: return 2;
+        case ET_DTYPE_BFLOAT16: return 2;
         default: return 0;
     }
 }
@@ -112,6 +117,11 @@ static executorch::aten::ScalarType to_scalar_type(ETDType dtype) {
         case ET_DTYPE_INT8: return executorch::aten::ScalarType::Char;
         case ET_DTYPE_UINT8: return executorch::aten::ScalarType::Byte;
         case ET_DTYPE_BOOL: return executorch::aten::ScalarType::Bool;
+        case ET_DTYPE_UINT16: return executorch::aten::ScalarType::UInt16;
+        case ET_DTYPE_UINT32: return executorch::aten::ScalarType::UInt32;
+        case ET_DTYPE_UINT64: return executorch::aten::ScalarType::UInt64;
+        case ET_DTYPE_FLOAT16: return executorch::aten::ScalarType::Half;
+        case ET_DTYPE_BFLOAT16: return executorch::aten::ScalarType::BFloat16;
         default: return executorch::aten::ScalarType::Float;
     }
 }
@@ -127,6 +137,11 @@ static ETDType from_scalar_type(executorch::aten::ScalarType scalar_type) {
         case executorch::aten::ScalarType::Char: return ET_DTYPE_INT8;
         case executorch::aten::ScalarType::Byte: return ET_DTYPE_UINT8;
         case executorch::aten::ScalarType::Bool: return ET_DTYPE_BOOL;
+        case executorch::aten::ScalarType::UInt16: return ET_DTYPE_UINT16;
+        case executorch::aten::ScalarType::UInt32: return ET_DTYPE_UINT32;
+        case executorch::aten::ScalarType::UInt64: return ET_DTYPE_UINT64;
+        case executorch::aten::ScalarType::Half: return ET_DTYPE_FLOAT16;
+        case executorch::aten::ScalarType::BFloat16: return ET_DTYPE_BFLOAT16;
         default: return ET_DTYPE_FLOAT32;
     }
 }
