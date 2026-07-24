@@ -161,6 +161,62 @@ ET_RETURN_ERROR(ET_ERROR_CODE, "message"); // Failure
 3. **Caller frees**: Use `et_module_free()`, `et_tensor_free()`, etc.
 4. **Status always freed**: Caller must free `ETStatus*` after checking
 
+## Local Compilation (testing native changes without a release)
+
+Prebuilt mode downloads an **already-compiled** `libexecutorch_ffi` — local edits
+to `src/*.cpp` have NO effect in prebuilt mode. To test native changes you must
+compile locally. Two supported paths, in order of preference:
+
+### Path 1 (recommended): let the Flutter build hook compile from source
+
+No manual cmake. In the consuming app's `pubspec.yaml` (e.g. `example/pubspec.yaml`):
+
+```yaml
+hooks:
+  user_defines:
+    executorch_flutter:
+      build_mode: "source"
+      executorch_source: "/path/to/executorch"   # local ExecuTorch checkout (recursive clone)
+      backends:
+        - xnnpack
+```
+
+Then `flutter run` / `flutter test` builds everything in the app's build phase.
+First build 15-30+ min; incremental afterwards. See the parent repo's
+`CONTRIBUTING.md` ("Source Build") for prerequisites.
+
+### Path 2: compile-local.sh + build_mode "local"
+
+`scripts/compile-local.sh --executorch-source /path/to/executorch` outputs to
+`local-builds/<platform>-<arch>-<backends>-<type>/`, consumed via
+`build_mode: "local"` (auto-detected). See parent `CONTRIBUTING.md` ("Local Build & Testing").
+
+### Known traps (learned the hard way — do NOT hand-drive stale build dirs)
+
+- **Python wrapper self-exec on reconfigure** (fixed in `cmake/build_from_source.cmake`
+  via the `EXECUTORCH_ORIGINAL_PYTHON` cache var): older build dirs re-wrote
+  `python_wrapper.sh` to exec itself on any second cmake configure, failing with
+  `Argument list too long` / `Undefined error: 0` from Codegen.cmake. Fix: re-run
+  cmake with `-DPYTHON_EXECUTABLE=/path/to/python3` once, or delete the build dir.
+- **Backend set must match the models you test**: a `metal`-only local build has
+  `ET_BUILD_XNNPACK=OFF`, so every xnnpack-delegated `.pte` fails to load. Build with
+  the backends your test models were exported for (usually `xnnpack`).
+- **libomp on macOS (Metal/AOTI builds only)**: cmake may link torch's bundled
+  `libomp.dylib`, whose install name is `/opt/homebrew/opt/libomp/lib/libomp.dylib`.
+  The sandboxed Flutter app cannot load that path at runtime. If hit: copy
+  `libomp.dylib` next to `libexecutorch_ffi.dylib` in `local-builds/.../lib/`, then
+  `install_name_tool -id @rpath/libomp.dylib libomp.dylib` and
+  `install_name_tool -change /opt/homebrew/opt/libomp/lib/libomp.dylib @rpath/libomp.dylib libexecutorch_ffi.dylib`,
+  re-`codesign -f -s -` both. Flutter's native-assets bundling then rewrites the
+  reference to the bundled framework automatically. Plain xnnpack builds don't link libomp.
+- **Stale app bundle after swapping local libs**: the hooks runner caches — run
+  `flutter clean` in the app after replacing dylibs in `local-builds/`, or the app
+  keeps the old copy.
+- **Torch paths cached from a deleted venv**: `TORCH_LIBRARY` / `TORCH_OMP_LIBRARY` /
+  `c10_LIBRARY` / `Caffe2_DIR` in `CMakeCache.txt` can point into a removed
+  virtualenv. Re-run cmake with `-D` overrides pointing at a live torch install,
+  or delete the build dir.
+
 ## Backend Support
 
 ### Currently Enabled
