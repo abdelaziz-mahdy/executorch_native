@@ -103,7 +103,12 @@ typedef enum {
     ET_DTYPE_INT16 = 4,
     ET_DTYPE_INT8 = 5,
     ET_DTYPE_UINT8 = 6,
-    ET_DTYPE_BOOL = 7
+    ET_DTYPE_BOOL = 7,
+    ET_DTYPE_UINT16 = 8,
+    ET_DTYPE_UINT32 = 9,
+    ET_DTYPE_UINT64 = 10,
+    ET_DTYPE_FLOAT16 = 11,   /* IEEE 754 half (ScalarType::Half) */
+    ET_DTYPE_BFLOAT16 = 12   /* Brain float16 (ScalarType::BFloat16) */
 } ETDType;
 
 /**

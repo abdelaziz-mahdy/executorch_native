@@ -249,7 +249,19 @@ endif()
 # PYTHONPATH Setup for ExecuTorch codegen
 # ============================================================================
 
-set(_original_python ${PYTHON_EXECUTABLE})
+# Remember the real interpreter across re-configures. PYTHON_EXECUTABLE is
+# FORCE-overwritten with the wrapper path below, so on any reconfigure the
+# wrapper would otherwise be written to exec itself (infinite recursion:
+# "Argument list too long" / "Undefined error: 0" from Codegen.cmake).
+if(NOT PYTHON_EXECUTABLE MATCHES "python_wrapper")
+    set(EXECUTORCH_ORIGINAL_PYTHON ${PYTHON_EXECUTABLE} CACHE STRING "Real Python interpreter wrapped for codegen" FORCE)
+endif()
+if(NOT DEFINED EXECUTORCH_ORIGINAL_PYTHON)
+    message(FATAL_ERROR
+        "PYTHON_EXECUTABLE points at the generated wrapper and no original "
+        "interpreter is cached. Re-run cmake with -DPYTHON_EXECUTABLE=/path/to/python3")
+endif()
+set(_original_python ${EXECUTORCH_ORIGINAL_PYTHON})
 set(_python_wrapper_dir ${CMAKE_BINARY_DIR}/python_wrapper)
 file(MAKE_DIRECTORY ${_python_wrapper_dir})
 

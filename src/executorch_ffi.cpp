@@ -97,6 +97,11 @@ static size_t dtype_size(ETDType dtype) {
         case ET_DTYPE_INT8: return 1;
         case ET_DTYPE_UINT8: return 1;
         case ET_DTYPE_BOOL: return 1;
+        case ET_DTYPE_UINT16: return 2;
+        case ET_DTYPE_UINT32: return 4;
+        case ET_DTYPE_UINT64: return 8;
+        case ET_DTYPE_FLOAT16: return 2;
+        case ET_DTYPE_BFLOAT16: return 2;
         default: return 0;
     }
 }
@@ -112,22 +117,38 @@ static executorch::aten::ScalarType to_scalar_type(ETDType dtype) {
         case ET_DTYPE_INT8: return executorch::aten::ScalarType::Char;
         case ET_DTYPE_UINT8: return executorch::aten::ScalarType::Byte;
         case ET_DTYPE_BOOL: return executorch::aten::ScalarType::Bool;
-        default: return executorch::aten::ScalarType::Float;
+        case ET_DTYPE_UINT16: return executorch::aten::ScalarType::UInt16;
+        case ET_DTYPE_UINT32: return executorch::aten::ScalarType::UInt32;
+        case ET_DTYPE_UINT64: return executorch::aten::ScalarType::UInt64;
+        case ET_DTYPE_FLOAT16: return executorch::aten::ScalarType::Half;
+        case ET_DTYPE_BFLOAT16: return executorch::aten::ScalarType::BFloat16;
+        default:
+            // Unreachable when tensors come from et_tensor_create, which
+            // rejects unknown dtypes. Log loudly instead of corrupting data.
+            ET_LOG("to_scalar_type: unknown ETDType %d, defaulting to Float",
+                   static_cast<int>(dtype));
+            return executorch::aten::ScalarType::Float;
     }
 }
 
-// Convert ExecuTorch ScalarType to ETDType
-static ETDType from_scalar_type(executorch::aten::ScalarType scalar_type) {
+// Convert ExecuTorch ScalarType to ETDType.
+// Returns false for scalar types with no ETDType mapping (caller must handle).
+static bool try_from_scalar_type(executorch::aten::ScalarType scalar_type, ETDType* out) {
     switch (scalar_type) {
-        case executorch::aten::ScalarType::Float: return ET_DTYPE_FLOAT32;
-        case executorch::aten::ScalarType::Double: return ET_DTYPE_FLOAT64;
-        case executorch::aten::ScalarType::Long: return ET_DTYPE_INT64;
-        case executorch::aten::ScalarType::Int: return ET_DTYPE_INT32;
-        case executorch::aten::ScalarType::Short: return ET_DTYPE_INT16;
-        case executorch::aten::ScalarType::Char: return ET_DTYPE_INT8;
-        case executorch::aten::ScalarType::Byte: return ET_DTYPE_UINT8;
-        case executorch::aten::ScalarType::Bool: return ET_DTYPE_BOOL;
-        default: return ET_DTYPE_FLOAT32;
+        case executorch::aten::ScalarType::Float: *out = ET_DTYPE_FLOAT32; return true;
+        case executorch::aten::ScalarType::Double: *out = ET_DTYPE_FLOAT64; return true;
+        case executorch::aten::ScalarType::Long: *out = ET_DTYPE_INT64; return true;
+        case executorch::aten::ScalarType::Int: *out = ET_DTYPE_INT32; return true;
+        case executorch::aten::ScalarType::Short: *out = ET_DTYPE_INT16; return true;
+        case executorch::aten::ScalarType::Char: *out = ET_DTYPE_INT8; return true;
+        case executorch::aten::ScalarType::Byte: *out = ET_DTYPE_UINT8; return true;
+        case executorch::aten::ScalarType::Bool: *out = ET_DTYPE_BOOL; return true;
+        case executorch::aten::ScalarType::UInt16: *out = ET_DTYPE_UINT16; return true;
+        case executorch::aten::ScalarType::UInt32: *out = ET_DTYPE_UINT32; return true;
+        case executorch::aten::ScalarType::UInt64: *out = ET_DTYPE_UINT64; return true;
+        case executorch::aten::ScalarType::Half: *out = ET_DTYPE_FLOAT16; return true;
+        case executorch::aten::ScalarType::BFloat16: *out = ET_DTYPE_BFLOAT16; return true;
+        default: return false;
     }
 }
 
@@ -192,7 +213,12 @@ static ETTensor* evalue_to_tensor(const EValue& evalue, int32_t output_index) {
         return nullptr;
     }
 
-    result->dtype = from_scalar_type(scalar_type);
+    if (!try_from_scalar_type(scalar_type, &result->dtype)) {
+        ET_LOG("evalue_to_tensor: output %d has unsupported ScalarType %d",
+               output_index, static_cast<int>(scalar_type));
+        delete result;
+        return nullptr;
+    }
     result->rank = static_cast<int32_t>(sizes.size());
     result->shape.resize(result->rank);
 
@@ -259,7 +285,14 @@ ET_API ETStatus* et_tensor_create(
         element_count *= static_cast<size_t>(shape[i]);
     }
 
-    size_t expected_size = element_count * dtype_size(dtype);
+    size_t elem_size = dtype_size(dtype);
+    if (elem_size == 0) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "unsupported dtype: %d", static_cast<int>(dtype));
+        return create_status(ET_INVALID_ARGUMENT, msg, __func__);
+    }
+
+    size_t expected_size = element_count * elem_size;
     if (data_size != expected_size) {
         char msg[256];
         snprintf(msg, sizeof(msg), "data size mismatch: expected %zu, got %zu", expected_size, data_size);
