@@ -23,6 +23,19 @@
 set -e
 
 VERSION="${1:-1.4.0}"
+
+# Which slice to build. The three targets share nothing — each has its own
+# .et-shared directory keyed by arch, and ccache cannot hit across them because
+# the target triple differs — so running them as separate CI jobs is pure
+# parallelism with no lost reuse. Defaults to "all" so local runs and any other
+# caller keep working unchanged.
+#   all | device | sim-x64 | sim-arm64
+TARGET="${2:-all}"
+case "$TARGET" in
+  all|device|sim-x64|sim-arm64) ;;
+  *) echo "ERROR: unknown target '$TARGET' (want: all|device|sim-x64|sim-arm64)" >&2; exit 2 ;;
+esac
+echo "  Target: ${TARGET}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
@@ -249,59 +262,66 @@ install_dependencies
 # Create dist directory
 mkdir -p dist
 
-# Build all device variants (arm64)
-echo ""
-echo "============================================================"
-echo "Building iOS Device variants (arm64)"
-echo "============================================================"
-for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Release"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Debug"
-done
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "device" ]; then
+  # Build all device variants (arm64)
+  echo ""
+  echo "============================================================"
+  echo "Building iOS Device variants (arm64)"
+  echo "============================================================"
+  for variant in "${VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan <<< "$variant"
+    build_device_variant "$backends" "$coreml" "$vulkan" "Release"
+    build_device_variant "$backends" "$coreml" "$vulkan" "Debug"
+  done
 
-# Build LLM device variants (pure CPU/XNNPACK)
-for variant in "${LLM_VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Release" "$llm"
-  build_device_variant "$backends" "$coreml" "$vulkan" "Debug" "$llm"
-done
+  # Build LLM device variants (pure CPU/XNNPACK)
+  for variant in "${LLM_VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+    build_device_variant "$backends" "$coreml" "$vulkan" "Release" "$llm"
+    build_device_variant "$backends" "$coreml" "$vulkan" "Debug" "$llm"
+  done
+fi
 
-# Build all simulator variants (x86_64 for Intel Macs)
-echo ""
-echo "============================================================"
-echo "Building iOS Simulator variants (x86_64)"
-echo "============================================================"
-for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64"
-done
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "sim-x64" ]; then
+  # Build all simulator variants (x86_64 for Intel Macs)
+  echo ""
+  echo "============================================================"
+  echo "Building iOS Simulator variants (x86_64)"
+  echo "============================================================"
+  for variant in "${VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan <<< "$variant"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64"
+  done
 
-# Build LLM simulator variants (x86_64, pure CPU/XNNPACK)
-for variant in "${LLM_VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64" "$llm"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64" "$llm"
-done
+  # Build LLM simulator variants (x86_64, pure CPU/XNNPACK)
+  for variant in "${LLM_VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "x86_64" "$llm"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "x86_64" "$llm"
+  done
+fi
 
-# Build all simulator variants (arm64 for Apple Silicon)
-echo ""
-echo "============================================================"
-echo "Building iOS Simulator variants (arm64)"
-echo "============================================================"
-for variant in "${VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64"
-done
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "sim-arm64" ]; then
+  # Build all simulator variants (arm64 for Apple Silicon)
+  echo ""
+  echo "============================================================"
+  echo "Building iOS Simulator variants (arm64)"
+  echo "============================================================"
+  for variant in "${VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan <<< "$variant"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64"
+  done
 
-# Build LLM simulator variants (arm64, pure CPU/XNNPACK)
-for variant in "${LLM_VARIANTS[@]}"; do
-  IFS=':' read -r backends coreml vulkan llm <<< "$variant"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64" "$llm"
-  build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64" "$llm"
-done
+  # Build LLM simulator variants (arm64, pure CPU/XNNPACK)
+  for variant in "${LLM_VARIANTS[@]}"; do
+    IFS=':' read -r backends coreml vulkan llm <<< "$variant"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Release" "arm64" "$llm"
+    build_simulator_variant "$backends" "$coreml" "$vulkan" "Debug" "arm64" "$llm"
+  done
+fi
+
 
 echo ""
 echo "============================================================"

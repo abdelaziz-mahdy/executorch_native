@@ -87,9 +87,26 @@ jobs:
           path: dist/*.tar.gz
           retention-days: 7
 
+  # Split by architecture (executorch_native#13). The three targets share
+  # nothing: each has its own .et-shared directory keyed by arch, and ccache
+  # cannot hit across them because the target triple and sysroot differ. Running
+  # them on one runner was therefore pure serialisation — 104m on v1.4.0.1.
+  #
+  # The per-target ccache key matters. With a single shared key the three jobs
+  # would overwrite each other's cache entry every run, which WOULD lose reuse.
   build-ios:
     runs-on: macos-15
-    name: iOS (device arm64 + simulator x86_64/arm64)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: device
+            label: device arm64
+          - target: sim-arm64
+            label: simulator arm64
+          - target: sim-x64
+            label: simulator x86_64
+    name: iOS (${{ matrix.label }})
 
     steps:
       - name: Checkout
@@ -107,9 +124,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-ios-${{ github.run_id }}
+          key: ccache-ios-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
-            ccache-ios-
+            ccache-ios-${{ matrix.target }}-
 
       - name: Install Vulkan SDK (MoltenVK + shaderc)
         run: |
@@ -125,7 +142,7 @@ jobs:
       - name: Run build script
         run: |
           chmod +x scripts/build-ios.sh
-          ./scripts/build-ios.sh "${{ inputs.version }}"
+          ./scripts/build-ios.sh "${{ inputs.version }}" "${{ matrix.target }}"
 
       - name: ccache stats
         if: always()
@@ -134,7 +151,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ios-all
+          name: ios-${{ matrix.target }}
           path: dist/*.tar.gz
           retention-days: 7
 
