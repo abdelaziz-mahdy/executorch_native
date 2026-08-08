@@ -156,7 +156,6 @@ build_device_variant() {
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
-    -DET_SUPERSET_BACKENDS="xnnpack;coreml;vulkan;llm" \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
   # Build
@@ -224,7 +223,6 @@ build_simulator_variant() {
     -DET_BUILD_VULKAN="${vulkan}" \
     -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
-    -DET_SUPERSET_BACKENDS="xnnpack;coreml;vulkan;llm" \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
   # Build
