@@ -126,7 +126,6 @@ build_variant() {
     -DET_BUILD_COREML=OFF \
     -DET_BUILD_MPS=OFF \
     -DET_BUILD_QNN=OFF \
-    -DET_SUPERSET_BACKENDS="xnnpack;vulkan;llm" \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
   # Build

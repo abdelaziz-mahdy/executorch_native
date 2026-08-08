@@ -149,7 +149,6 @@ function Build-Variant {
         -DET_BUILD_COREML=OFF `
         -DET_BUILD_MPS=OFF `
         -DET_BUILD_QNN=OFF `
-        -DET_SUPERSET_BACKENDS="xnnpack;vulkan;llm" `
         "-DCMAKE_INSTALL_PREFIX=$BuildDir\install"
 
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
