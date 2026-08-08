@@ -8,18 +8,18 @@
     - arm64: xnnpack (not currently built - requires ARM64 runner)
 
 .PARAMETER Version
-    ExecuTorch version to build (default: 1.3.1)
+    ExecuTorch version to build (default: 1.4.0)
 
 .PARAMETER VulkanSdkVersion
     Vulkan SDK version to install (default: 1.4.321.0)
 
 .EXAMPLE
     .\build-windows.ps1
-    .\build-windows.ps1 -Version 1.3.1
+    .\build-windows.ps1 -Version 1.4.0
 #>
 
 param(
-    [string]$Version = "1.3.1",
+    [string]$Version = "1.4.0",
     [string]$VulkanSdkVersion = "1.4.321.0"
 )
 

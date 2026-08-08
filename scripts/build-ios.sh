@@ -18,11 +18,11 @@
 # Vulkan builds require glslc compiler (install: brew install shaderc molten-vk)
 #
 # Usage: ./build-ios.sh [VERSION]
-# Example: ./build-ios.sh 1.3.1
+# Example: ./build-ios.sh 1.4.0
 
 set -e
 
-VERSION="${1:-1.3.1}"
+VERSION="${1:-1.4.0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
