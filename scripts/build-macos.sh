@@ -261,6 +261,10 @@ build_variant() {
   # (the variant's wrapper still links only its own backend subset). MLX's 14.0
   # deployment target gets its own shared dir so the version-min flag change does
   # not invalidate the 11.0 cache.
+  # d14 holds only the MLX variant, so its superset is the MLX set; d11
+  # holds the eight tensor variants plus xnnpack-llm.
+  local superset="xnnpack;coreml;metal;vulkan;llm"
+  [ "$mlx" = "ON" ] && superset="xnnpack;mlx;llm"
   local et_class="d${deploy%%.*}"
   local shared_et_dir="${PROJECT_DIR}/.et-shared/${PLATFORM}-${arch}-${build_type_lower}-${et_class}"
 
@@ -295,6 +299,7 @@ build_variant() {
     -DET_BUILD_MLX="${mlx}" \
     -DET_BUILD_LLM="${llm}" \
     -DET_BUILD_QNN=OFF \
+    -DET_SUPERSET_BACKENDS="${superset}" \
     -DCMAKE_INSTALL_PREFIX="${build_dir}/install"
 
   # Build
