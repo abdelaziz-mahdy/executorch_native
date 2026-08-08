@@ -137,10 +137,11 @@ Builds are uploaded to GitHub Releases as `.tar.gz` (Unix) or `.zip` (Windows).
    }
    ```
 
-3. **Regenerate Dart bindings** in parent repo:
+3. **Regenerate Dart bindings** in the owning package:
    ```bash
-   cd ../  # executorch_flutter
-   dart run ffigen
+   cd ../  # packages/executorch_dart
+   dart run ffigen --config ffigen.yaml
+   dart run ffigen --config ffigen_llm.yaml
    ```
 
 4. **Test** the new function from Dart
@@ -169,17 +170,26 @@ compile locally. Two supported paths, in order of preference:
 
 ### Path 1 (recommended): let the Flutter build hook compile from source
 
-No manual cmake. In the consuming app's `pubspec.yaml` (e.g. `example/pubspec.yaml`):
+No manual cmake. In the consuming app's `pubspec.yaml`:
 
 ```yaml
 hooks:
   user_defines:
-    executorch_flutter:
+    executorch_dart:
       build_mode: "source"
       executorch_source: "/path/to/executorch"   # local ExecuTorch checkout (recursive clone)
       backends:
         - xnnpack
 ```
+
+The key is `executorch_dart` — that package owns this native build, even when
+the app only depends on `executorch_flutter`. It was `executorch_flutter` before
+the 0.6.0 core split; the old key is now rejected with an error naming the fix.
+
+When working inside the parent repo, this block goes in the **workspace root**
+`pubspec.yaml`, not `packages/executorch_flutter/example/pubspec.yaml`. Pub
+workspaces read `user_defines` only from the root — a block in a member package
+is silently ignored and the build falls back to defaults.
 
 Then `flutter run` / `flutter test` builds everything in the app's build phase.
 First build 15-30+ min; incremental afterwards. See the parent repo's
@@ -277,12 +287,13 @@ The parent Flutter plugin uses this library via:
 
 After releasing a new native version:
 
-1. Update `_defaultPrebuiltVersion` in parent's `lib/src/build/run_build.dart`
+1. Update `_defaultPrebuiltVersion` in the parent's
+   `packages/executorch_dart/lib/src/build/run_build.dart`
 2. Update submodule reference:
    ```bash
    cd executorch_flutter
-   cd native && git pull origin main && cd ..
-   git add native
+   cd packages/executorch_dart/native && git pull origin main && cd -
+   git add packages/executorch_dart/native
    git commit -m "chore: Update native submodule to vX.X.X.X"
    ```
 
