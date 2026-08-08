@@ -80,9 +80,54 @@ set(EXECUTORCH_BUILD_EXTENSION_FLAT_TENSOR ON CACHE BOOL "Build flat tensor exte
 set(EXECUTORCH_BUILD_EXTENSION_NAMED_DATA_MAP ON CACHE BOOL "Build named data map extension" FORCE)
 set(EXECUTORCH_BUILD_EXTENSION_RUNNER_UTIL ON CACHE BOOL "Build runner util extension" FORCE)
 
-# LLM (text generation) runner + tokenizers. Only when ET_BUILD_LLM is set, so
-# tensor-only builds don't pay the extra compile time / binary size.
-if(ET_BUILD_LLM)
+# COMPILE-ONCE / LINK-MANY, part two.
+#
+# Pointing every variant at one shared ExecuTorch sub-build directory only pays
+# off if the compile commands match. They did not. Each variant reconfigured
+# that shared directory with different -DET_BUILD_* values, those propagate into
+# ExecuTorch's own targets, so CMake rebuilt them and ccache missed.
+#
+# Measured on the v1.3.1.9 macOS job: 7078 object compiles for 4087 distinct
+# objects (42% redundant), core files rebuilt 9 times inside a single shared dir
+# -- once per variant sharing it -- and a 33% ccache hit rate, below the ~41%
+# this mechanism was introduced to beat.
+#
+# ET_SUPERSET_BACKENDS makes the sub-build a superset of every backend the
+# platform ships, so it is identical across variants and genuinely compiles once.
+# ET_BUILD_* is deliberately left alone: it still decides what the wrapper LINKS
+# and what the variant is named, so shipped libraries stay exactly as slim as
+# before. Variant differences move from compile time to link time.
+#
+# The list comes from the build scripts rather than being inferred here, because
+# each platform ships a different set -- iOS has no Metal, Linux and Android are
+# XNNPACK+Vulkan only -- and guessing wrong turns a fast build into a broken one.
+set(ET_SUPERSET_BACKENDS "" CACHE STRING
+    "Backends compiled into the shared ExecuTorch sub-build (superset)")
+
+function(_et_effective backend requested out_var)
+    if("${backend}" IN_LIST ET_SUPERSET_BACKENDS)
+        set(${out_var} ON PARENT_SCOPE)
+    else()
+        set(${out_var} ${requested} PARENT_SCOPE)
+    endif()
+endfunction()
+
+if(NOT "${ET_SUPERSET_BACKENDS}" STREQUAL "")
+    message(STATUS "ExecuTorch sub-build superset: ${ET_SUPERSET_BACKENDS}")
+endif()
+
+_et_effective(xnnpack "${ET_BUILD_XNNPACK}" _want_xnnpack)
+_et_effective(coreml  "${ET_BUILD_COREML}"  _want_coreml)
+_et_effective(mps     "${ET_BUILD_MPS}"     _want_mps)
+_et_effective(metal   "${ET_BUILD_METAL}"   _want_metal)
+_et_effective(mlx     "${ET_BUILD_MLX}"     _want_mlx)
+_et_effective(vulkan  "${ET_BUILD_VULKAN}"  _want_vulkan)
+_et_effective(llm     "${ET_BUILD_LLM}"     _want_llm)
+
+# LLM (text generation) runner + tokenizers. Built whenever the superset asks
+# for it, so an LLM variant sharing a directory with tensor variants does not
+# toggle the option and invalidate everything.
+if(_want_llm)
     set(EXECUTORCH_BUILD_EXTENSION_LLM ON CACHE BOOL "Build LLM extension" FORCE)
     set(EXECUTORCH_BUILD_EXTENSION_LLM_RUNNER ON CACHE BOOL "Build LLM runner extension" FORCE)
     # Quantized LLM .pte files (optimum 8da4w linears + 8w embedding) call ops that run
@@ -138,19 +183,19 @@ message(STATUS "ET_BUILD_MPS input: ${ET_BUILD_MPS}")
 message(STATUS "ET_BUILD_VULKAN input: ${ET_BUILD_VULKAN}")
 message(STATUS "ET_BUILD_QNN input: ${ET_BUILD_QNN}")
 
-if(ET_BUILD_XNNPACK)
+if(_want_xnnpack)
     set(EXECUTORCH_BUILD_XNNPACK ON CACHE BOOL "Build XNNPACK backend" FORCE)
 else()
     set(EXECUTORCH_BUILD_XNNPACK OFF CACHE BOOL "Build XNNPACK backend" FORCE)
 endif()
 
-if(ET_BUILD_COREML AND APPLE)
+if(_want_coreml AND APPLE)
     set(EXECUTORCH_BUILD_COREML ON CACHE BOOL "Build CoreML backend" FORCE)
 else()
     set(EXECUTORCH_BUILD_COREML OFF CACHE BOOL "Build CoreML backend" FORCE)
 endif()
 
-if(ET_BUILD_MPS AND APPLE)
+if(_want_mps AND APPLE)
     set(EXECUTORCH_BUILD_MPS ON CACHE BOOL "Build MPS backend" FORCE)
 else()
     set(EXECUTORCH_BUILD_MPS OFF CACHE BOOL "Build MPS backend" FORCE)
@@ -159,7 +204,7 @@ endif()
 # Metal backend (macOS-only): an AOTI-based delegate. Requires the
 # tensor extension and pulls in the shared AOTI runtime (aoti_common). Needs a
 # matching PyTorch + pyyaml available at build time (see build scripts).
-if(ET_BUILD_METAL AND APPLE)
+if(_want_metal AND APPLE)
     set(EXECUTORCH_BUILD_METAL ON CACHE BOOL "Build Metal backend" FORCE)
     set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
 else()
@@ -185,7 +230,7 @@ endif()
 #
 # Hard requirement: deployment target >= macOS 14.0 (the MLX CMakeLists
 # FATAL_ERRORs below that).
-if(ET_BUILD_MLX AND APPLE)
+if(_want_mlx AND APPLE)
     set(EXECUTORCH_BUILD_MLX ON CACHE BOOL "Build MLX backend" FORCE)
     set(EXECUTORCH_BUILD_EXTENSION_TENSOR ON CACHE BOOL "Build tensor extension" FORCE)
     # MLX requires macOS 14.0+. backends/mlx/CMakeLists.txt picks its minimum from
@@ -210,7 +255,7 @@ else()
 endif()
 
 # Vulkan requires glslc compiler - check availability when requested
-if(ET_BUILD_VULKAN)
+if(_want_vulkan)
     find_program(GLSLC_EXECUTABLE glslc
         HINTS
             $ENV{VULKAN_SDK}/bin
