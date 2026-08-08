@@ -543,7 +543,7 @@ endif()
 # clone is missing it and configure dies with "add_subdirectory ... does not
 # contain a CMakeLists.txt: extension/llm/tokenizers". Init it (recursively) on
 # demand, the same way the MLX/eigen submodules are handled below.
-if(ET_BUILD_LLM)
+if(ET_BUILD_LLM OR ET_BUILD_TOKENIZER)
     set(_tokenizers_dir "${executorch_SOURCE_DIR}/extension/llm/tokenizers")
     if(NOT EXISTS "${_tokenizers_dir}/CMakeLists.txt")
         message(STATUS "LLM tokenizers submodule missing, fetching (recursive)...")
@@ -569,9 +569,9 @@ endif()
 # (spm_encode, spm_train, ...) as MACOSX_BUNDLE under the Xcode generator, and
 # their install() rules then fail configure with "no BUNDLE DESTINATION". We build
 # a shared library, not app bundles, so force bundles off to keep them valid.
-if(ET_BUILD_LLM AND APPLE)
+if((ET_BUILD_LLM OR ET_BUILD_TOKENIZER) AND APPLE)
     set(CMAKE_MACOSX_BUNDLE OFF CACHE BOOL "" FORCE)
-    message(STATUS "LLM build: CMAKE_MACOSX_BUNDLE forced OFF (sentencepiece tools)")
+    message(STATUS "Tokenizer build: CMAKE_MACOSX_BUNDLE forced OFF (sentencepiece tools)")
 
     # sentencepiece's src/CMakeLists.txt calls set_xcode_property() on its CLI
     # tools (spm_encode/decode/...) under `if(CMAKE_SYSTEM_NAME STREQUAL "iOS")`,
@@ -847,9 +847,6 @@ if(ET_BUILD_LLM)
     if(TARGET extension_llm_sampler)
         list(APPEND EXECUTORCH_LIBRARIES extension_llm_sampler)
     endif()
-    if(TARGET tokenizers)
-        list(APPEND EXECUTORCH_LIBRARIES tokenizers)
-    endif()
     # Quantized op kernel library. Unlike the backend delegates, this op lib does NOT
     # self-apply whole-archive via its INTERFACE options, so we must call
     # executorch_target_link_options_shared_lib() on it (the same helper the upstream
@@ -859,7 +856,27 @@ if(ET_BUILD_LLM)
         list(APPEND EXECUTORCH_LIBRARIES quantized_ops_lib)
         executorch_target_link_options_shared_lib(quantized_ops_lib)
     endif()
-    # Belt-and-suspenders: tokenizers public headers (pytorch/tokenizers/*).
+endif()
+
+# Tokenizers. ExecuTorch only adds this subdirectory as part of the LLM runner
+# extension, but the standalone tokenizer FFI needs it without the runner, so
+# add it directly when nothing else has.
+if(ET_BUILD_TOKENIZER)
+    if(NOT TARGET tokenizers)
+        message(STATUS "Adding tokenizers subdirectory (standalone, no LLM runner)")
+        add_subdirectory(
+            ${executorch_SOURCE_DIR}/extension/llm/tokenizers
+            ${CMAKE_BINARY_DIR}/tokenizers
+            EXCLUDE_FROM_ALL
+        )
+    endif()
+    if(TARGET tokenizers)
+        list(APPEND EXECUTORCH_LIBRARIES tokenizers)
+    else()
+        message(FATAL_ERROR
+            "ET_BUILD_TOKENIZER is ON but no 'tokenizers' target exists after "
+            "adding ${executorch_SOURCE_DIR}/extension/llm/tokenizers.")
+    endif()
     list(APPEND EXECUTORCH_INCLUDE_DIRS
         ${executorch_SOURCE_DIR}/extension/llm/tokenizers/include
     )

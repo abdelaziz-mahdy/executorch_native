@@ -34,14 +34,14 @@ endif()
 
 # ExecuTorch source version (upstream PyTorch ExecuTorch version)
 if(NOT DEFINED EXECUTORCH_VERSION OR "${EXECUTORCH_VERSION}" STREQUAL "")
-    set(EXECUTORCH_VERSION "1.3.1" CACHE STRING "ExecuTorch source version" FORCE)
+    set(EXECUTORCH_VERSION "1.4.0" CACHE STRING "ExecuTorch source version" FORCE)
 else()
     set(EXECUTORCH_VERSION "${EXECUTORCH_VERSION}" CACHE STRING "ExecuTorch source version" FORCE)
 endif()
 
 # Prebuilt release version (our release tag for prebuilt downloads)
 if(NOT DEFINED EXECUTORCH_PREBUILT_VERSION OR "${EXECUTORCH_PREBUILT_VERSION}" STREQUAL "")
-    set(EXECUTORCH_PREBUILT_VERSION "1.3.1.9" CACHE STRING "Prebuilt release version" FORCE)
+    set(EXECUTORCH_PREBUILT_VERSION "1.4.0.1" CACHE STRING "Prebuilt release version" FORCE)
 else()
     set(EXECUTORCH_PREBUILT_VERSION "${EXECUTORCH_PREBUILT_VERSION}" CACHE STRING "Prebuilt release version" FORCE)
 endif()
@@ -73,6 +73,21 @@ option(ET_BUILD_QNN "Build with QNN backend" OFF)
 # bundles libextension_llm_runner + libtokenizers) — see build_from_source.cmake.
 option(ET_BUILD_LLM "Build with LLM (text generation) runner FFI" OFF)
 option(ET_BUILD_LLM_HARNESS "Build the standalone LLM validation harness" OFF)
+
+# Standalone tokenizer (text <-> token ids), for encoder models that need to
+# tokenize without any generation loop. ON by default: measured ~2 MB linked,
+# where the alternative — making these users enable ET_BUILD_LLM — costs +35 MB
+# on android-arm64. The LLM runner needs the tokenizer anyway, so enabling LLM
+# implies this.
+#
+# Kept as a switch rather than hardcoded so a size-constrained build can drop it,
+# and so the dependency stays visible. It does NOT affect the prebuilt variant
+# name — the tokenizer ships in the base library for every variant.
+option(ET_BUILD_TOKENIZER "Build the standalone tokenizer FFI" ON)
+if(ET_BUILD_LLM AND NOT ET_BUILD_TOKENIZER)
+    set(ET_BUILD_TOKENIZER ON CACHE BOOL "Build the standalone tokenizer FFI" FORCE)
+    message(STATUS "  ET_BUILD_TOKENIZER forced ON (required by ET_BUILD_LLM)")
+endif()
 
 # Platform-specific defaults.
 # CoreML is enabled on all Apple platforms. The deprecated MPS backend is
@@ -276,6 +291,23 @@ set(SOURCES
 set(HEADERS
     src/executorch_ffi.h
 )
+
+# Standalone tokenizer FFI. Unlike the LLM runner this is NOT gated: encoder
+# models (embeddings, classification, retrieval) need text -> token ids without
+# any generation loop, and making them pull in the whole LLM runner to get it
+# would cost far more than the tokenizer itself (measured ~2 MB linked, against
+# +35 MB for the llm variant on android-arm64).
+#
+# executorch_tokenizer_sp.cpp is a separate translation unit ON PURPOSE — see
+# the comment at the top of that file before merging it into anything else.
+if(ET_BUILD_TOKENIZER)
+    list(APPEND SOURCES
+        src/executorch_tokenizer_ffi.cpp
+        src/executorch_tokenizer_sp.cpp
+    )
+    list(APPEND HEADERS src/executorch_tokenizer_ffi.h)
+    message(STATUS "  Tokenizer FFI: ENABLED")
+endif()
 
 # LLM runner FFI is compiled only when enabled (keeps tensor-only builds intact).
 if(ET_BUILD_LLM)
