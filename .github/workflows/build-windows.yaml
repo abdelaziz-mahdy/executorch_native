@@ -22,6 +22,10 @@ on:
         required: true
         default: '1.1.0'
 
+env:
+  SCCACHE_DIR: ${{ github.workspace }}/.sccache
+  SCCACHE_CACHE_SIZE: 2G
+
 concurrency:
   group: build-windows-${{ github.ref }}
   cancel-in-progress: true
@@ -96,6 +100,22 @@ jobs:
       # Ninja + clang-cl (replacing the VS/MSBuild generator) need the MSVC x64
       # toolchain environment (link.exe, Windows SDK, INCLUDE/LIB) on PATH. The VS
       # generator set this up implicitly; with Ninja we activate it explicitly.
+      # Windows had NO compiler cache at all, so every run recompiled
+      # everything from scratch — 53m on v1.4.0.1 with zero reuse. sccache
+      # rather than ccache: it has proper MSVC support. CMakeLists already
+      # picks either up via find_program, so nothing else needs to change; if
+      # the install fails the build simply proceeds uncached as before.
+      - name: Install sccache
+        run: choco install sccache -y --no-progress
+
+      - name: Cache sccache (ExecuTorch object files)
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-windows-x64-${{ github.run_id }}
+          restore-keys: |
+            sccache-windows-x64-
+
       - name: Set up MSVC developer environment (x64)
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -105,6 +125,10 @@ jobs:
         shell: pwsh
         run: |
           .\scripts\build-windows.ps1 -Version "${{ inputs.version }}"
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
