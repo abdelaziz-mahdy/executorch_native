@@ -80,12 +80,6 @@ jobs:
       # Save only on the default branch, and even on failure: a job that dies at
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
-      - name: Save android cache (default branch only)
-        uses: actions/cache/save@v4
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-android-${{ matrix.abi }}-${{ github.run_id }}
 
       - name: Setup Android NDK
         run: |
@@ -130,6 +124,13 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s
+
+      - name: Save android cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-android-${{ matrix.abi }}-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
