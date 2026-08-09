@@ -353,6 +353,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
     ET_BUILD_VULKAN=$<BOOL:${ET_BUILD_VULKAN}>
     ET_BUILD_QNN=$<BOOL:${ET_BUILD_QNN}>
     ET_BUILD_LLM=$<BOOL:${ET_BUILD_LLM}>
+    # The version the library is actually built against. EXECUTORCH_VERSION
+    # already selects the prebuilt and prints a status line; without passing it
+    # here too, et_executorch_version() fell back to a hardcoded string and
+    # reported 1.1.0 through 1.2.0, 1.3.1 and 1.4.0.
+    EXECUTORCH_VERSION="${EXECUTORCH_VERSION}"
 )
 
 # ============================================================================
