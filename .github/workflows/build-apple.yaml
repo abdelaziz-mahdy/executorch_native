@@ -71,12 +71,6 @@ jobs:
       # Save only on the default branch, and even on failure: a job that dies at
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
-      - name: Save macos cache (default branch only)
-        uses: actions/cache/save@v4
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-macos-${{ github.run_id }}
 
       - name: Install Vulkan SDK (MoltenVK + shaderc)
         run: |
@@ -97,6 +91,13 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s
+
+      - name: Save macos cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-macos-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -157,12 +158,6 @@ jobs:
       # Save only on the default branch, and even on failure: a job that dies at
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
-      - name: Save ios cache (default branch only)
-        uses: actions/cache/save@v4
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-ios-${{ matrix.target }}-${{ github.run_id }}
 
       - name: Install Vulkan SDK (MoltenVK + shaderc)
         run: |
@@ -183,6 +178,13 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s
+
+      - name: Save ios cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ios-${{ matrix.target }}-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

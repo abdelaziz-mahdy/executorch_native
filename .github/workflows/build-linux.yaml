@@ -71,12 +71,6 @@ jobs:
       # Save only on the default branch, and even on failure: a job that dies at
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
-      - name: Save linux cache (default branch only)
-        uses: actions/cache/save@v4
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-linux-x64-${{ github.run_id }}
 
       - name: Install Vulkan tools (build shaderc for glslc)
         run: |
@@ -112,6 +106,13 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s
+
+      - name: Save linux cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-x64-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -155,12 +156,6 @@ jobs:
       # Save only on the default branch, and even on failure: a job that dies at
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
-      - name: Save linux cache (default branch only)
-        uses: actions/cache/save@v4
-        if: always() && github.ref == 'refs/heads/main'
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-linux-arm64-${{ github.run_id }}
 
       - name: Install Vulkan tools (build shaderc for glslc)
         run: |
@@ -197,6 +192,13 @@ jobs:
       - name: ccache stats
         if: always()
         run: ccache -s
+
+      - name: Save linux cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-arm64-${{ github.run_id }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
