@@ -1,0 +1,77 @@
+name: Warm ccache
+
+# Releases run on TAGS, and GitHub Actions caches are ref-scoped: a run can only
+# restore caches saved by its own ref, its PR base, or the DEFAULT branch. Since
+# nothing built on main, every tag saved a dead-end cache and found none to
+# restore, so each release started cold. Measured on the v1.4.0.1 macOS job:
+# 7574/21458 hits (35%), with the same 21458 compilations repeated on v1.4.0.3.
+#
+# For contrast, a local run where the cache IS warm hits 97.7% on the second
+# variant — the compile-once/link-many mechanism works, it just never had a
+# cache to work with in CI.
+#
+# This workflow builds on main so the cache is saved under the default branch,
+# which tag runs can then restore through their existing `restore-keys`.
+#
+# See executorch_native#6 (root cause 1).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'scripts/**'
+      - '.github/workflows/build-*.yaml'
+      - '.github/workflows/warm-ccache.yaml'
+  schedule:
+    # Weekly, so the cache does not age out (GitHub evicts entries unused for
+    # 7 days) even when nothing lands on main.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: warm-ccache
+  cancel-in-progress: true
+
+jobs:
+  # Read the version from CMakeLists rather than hardcoding it here — one more
+  # place to forget on an upgrade is one more place to go stale.
+  get-version:
+    name: Get Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          VERSION=$(grep -m1 'set(EXECUTORCH_VERSION "' CMakeLists.txt \
+                    | sed 's/.*set(EXECUTORCH_VERSION "\([^"]*\)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            echo "could not read EXECUTORCH_VERSION from CMakeLists.txt" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Warming caches for ExecuTorch $VERSION"
+
+  # Only the slow platforms. The GitHub cache budget is 10 GB per repository and
+  # entries are evicted LRU, so warming everything would evict what matters.
+  # macOS and Android are the long poles (85m and ~50m on v1.4.0.1); Linux and
+  # Windows are comparatively cheap.
+  warm-apple:
+    name: Warm Apple
+    needs: get-version
+    uses: ./.github/workflows/build-apple.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
+
+  warm-android:
+    name: Warm Android
+    needs: get-version
+    uses: ./.github/workflows/build-android.yaml
+    with:
+      version: ${{ needs.get-version.outputs.version }}
+      upload_release: false
