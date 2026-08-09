@@ -61,13 +61,31 @@ jobs:
       - name: Install ccache
         run: sudo apt-get update && sudo apt-get install -y ccache
 
+      # Restore only. Actions caches are ref-scoped, so anything a TAG run saves
+      # can never be restored by another ref — it is a dead end that still
+      # consumes the 10 GB repository budget. Measured before this change: 14
+      # entries, 9.74 GB, every one scoped to refs/tags/*, leaving no room for
+      # the default-branch cache that tag runs actually restore from.
+      #
+      # Saving happens only on the default branch (the save step below), which
+      # is the one scope every ref can read.
       - name: Cache ccache (ExecuTorch object files)
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-android-${{ matrix.abi }}-${{ github.run_id }}
           restore-keys: |
             ccache-android-${{ matrix.abi }}-
+
+      # Save only on the default branch, and even on failure: a job that dies at
+      # variant 28 of 30 has still done most of the work, and these jobs run
+      # 30-100 minutes.
+      - name: Save android cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-android-${{ matrix.abi }}-${{ github.run_id }}
 
       - name: Setup Android NDK
         run: |
