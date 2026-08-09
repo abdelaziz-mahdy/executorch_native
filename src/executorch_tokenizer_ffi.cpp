@@ -115,6 +115,30 @@ std::unique_ptr<::tokenizers::Tokenizer> load_any(const std::string& path,
     return nullptr;
 }
 
+/**
+ * Whether the file looks like a HuggingFace tokenizer.json.
+ *
+ * Trying every reader means a genuine failure in the RIGHT reader is followed
+ * by three irrelevant ones, and the caller only sees "nothing recognized this
+ * file". That sent a user hunting a format problem when the real cause was a
+ * lookahead regex the HF pre-tokenizer could not compile
+ * (executorch_flutter#45). Knowing the file was JSON lets the error say which
+ * reader was supposed to handle it, and where the real message went.
+ */
+bool looks_like_json(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (f == nullptr) return false;
+    char buf[64] = {0};
+    const size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+    std::fclose(f);
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned char c = static_cast<unsigned char>(buf[i]);
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+        return c == '{';
+    }
+    return false;
+}
+
 } // namespace
 
 /* ============================================================================
@@ -135,9 +159,25 @@ ET_API ETStatus* et_tokenizer_create(const char* tokenizer_path,
         const char* format = nullptr;
         auto impl = load_any(std::string(tokenizer_path), &format);
         if (impl == nullptr) {
+            // Point at the reader that was actually supposed to work, rather
+            // than reporting the last of four unrelated failures.
+            if (looks_like_json(tokenizer_path)) {
+                return create_status(
+                    ET_MODEL_LOAD_FAILED,
+                    "file parses as JSON, so the HuggingFace reader was the one "
+                    "expected to handle it, and it rejected the file. The other "
+                    "readers (tiktoken, sentencepiece, llama2c) were then tried "
+                    "and failed for unrelated reasons. See stderr for the "
+                    "HuggingFace reader's own error — common causes are a "
+                    "WordPiece model or a BertNormalizer (neither is "
+                    "implemented), or an unsupported pre-tokenizer",
+                    __func__);
+            }
             return create_status(ET_MODEL_LOAD_FAILED,
-                                 "failed to load tokenizer (unrecognized format, "
-                                 "or file missing/unreadable)",
+                                 "failed to load tokenizer: no reader accepted "
+                                 "this file (tried HuggingFace JSON, tiktoken, "
+                                 "sentencepiece, llama2c). See stderr for each "
+                                 "reader's own error",
                                  __func__);
         }
 

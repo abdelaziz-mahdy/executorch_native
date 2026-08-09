@@ -543,6 +543,22 @@ endif()
 # clone is missing it and configure dies with "add_subdirectory ... does not
 # contain a CMakeLists.txt: extension/llm/tokenizers". Init it (recursively) on
 # demand, the same way the MLX/eigen submodules are handled below.
+# Lookahead regex support in the tokenizers library. Upstream defaults this
+# OFF, which silently rules out any tokenizer whose pre_tokenizer uses a
+# lookahead — including the standard GPT-4 / cl100k Split pattern
+# `(?i:'s|'t|'re|...)`, which is extremely common.
+#
+# Without it, loading fails with:
+#   RE2 doesn't support lookahead patterns. Link with `regex_lookahead`.
+# and, because the loader then falls through to tiktoken, sentencepiece and
+# llama2c and fails all of them, the user sees a generic "unrecognized format"
+# error that points nowhere near the real cause.
+#
+# Reported against ibm-granite/granite-embedding-97m-multilingual-r2
+# (executorch_flutter#45).
+set(SUPPORT_REGEX_LOOKAHEAD ON CACHE BOOL
+    "Support regex lookahead patterns (requires PCRE2)" FORCE)
+
 if(ET_BUILD_LLM OR ET_BUILD_TOKENIZER)
     set(_tokenizers_dir "${executorch_SOURCE_DIR}/extension/llm/tokenizers")
     if(NOT EXISTS "${_tokenizers_dir}/CMakeLists.txt")
@@ -870,6 +886,20 @@ if(ET_BUILD_TOKENIZER)
             EXCLUDE_FROM_ALL
         )
     endif()
+    # regex_lookahead supplies the strong create_fallback_regex (PCRE2, then
+    # std::regex). Nothing references its symbols directly, so without
+    # whole-archive the linker discards it and the weak stub survives — which
+    # is exactly what shipped: 0 pcre2 symbols in the built library.
+    if(TARGET regex_lookahead)
+        list(APPEND EXECUTORCH_LIBRARIES regex_lookahead)
+        executorch_target_link_options_shared_lib(regex_lookahead)
+        message(STATUS "Tokenizer: regex lookahead ENABLED (PCRE2 fallback)")
+    else()
+        message(WARNING
+            "Tokenizer: regex_lookahead target missing — tokenizers using "
+            "lookahead pre-tokenizer patterns will fail to load")
+    endif()
+
     if(TARGET tokenizers)
         list(APPEND EXECUTORCH_LIBRARIES tokenizers)
     else()
