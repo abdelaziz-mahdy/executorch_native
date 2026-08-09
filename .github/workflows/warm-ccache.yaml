@@ -15,26 +15,19 @@ name: Warm ccache
 #
 # See executorch_native#6 (root cause 1).
 
+# Deliberately NOT triggered on push. Two PRs merged seconds apart queued two
+# full warm builds — roughly 85m of macOS and 50m of Android each — for a
+# cache that only needed populating once. Warming exists to keep a cache alive,
+# not to rebuild per commit.
+#
+# Run it manually before cutting a release when native sources have changed;
+# the weekly run covers everything else.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
-      - 'scripts/**'
-      - '.github/workflows/build-*.yaml'
-      - '.github/workflows/warm-ccache.yaml'
   schedule:
-    # Weekly, so the cache does not age out (GitHub evicts entries unused for
-    # 7 days) even when nothing lands on main.
+    # Weekly: GitHub deletes cache entries unused for 7 days, so this keeps the
+    # default-branch cache from ageing out between releases.
     - cron: '0 3 * * 1'
   workflow_dispatch:
-
-# The reusable build workflows expect these from their caller — release.yaml
-# grants both. Omitting them fails the run at startup, before any job begins.
-permissions:
-  contents: write
 
 concurrency:
   # Shared with release.yaml so a warm run and a release build never compile the
