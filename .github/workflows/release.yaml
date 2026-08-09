@@ -12,8 +12,12 @@ on:
         default: '1.1.0'
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  # Shared with warm-ccache.yaml. A release must not compile the same thing at
+  # the same time as a cache-warming run — that is two cold builds racing for
+  # the same runners, which is what happened on v1.4.0.4. Queue instead, so the
+  # release starts after warming has populated the default-branch cache.
+  group: native-build
+  cancel-in-progress: false
 
 # Grant permissions to all jobs (inherited by workflow_call)
 permissions:
