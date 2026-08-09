@@ -108,13 +108,22 @@ jobs:
       - name: Install sccache
         run: choco install sccache -y --no-progress
 
-      - name: Cache sccache (ExecuTorch object files)
-        uses: actions/cache@v4
+      # Restore only — see the note in build-apple.yaml. A tag-scoped cache is
+      # a dead end that still consumes the shared 10 GB repository budget.
+      - name: Restore sccache (ExecuTorch object files)
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/.sccache
           key: sccache-windows-x64-${{ github.run_id }}
           restore-keys: |
             sccache-windows-x64-
+
+      - name: Save sccache cache (default branch only)
+        uses: actions/cache/save@v4
+        if: always() && github.ref == 'refs/heads/main'
+        with:
+          path: ${{ github.workspace }}/.sccache
+          key: sccache-windows-x64-${{ github.run_id }}
 
       - name: Set up MSVC developer environment (x64)
         uses: ilammy/msvc-dev-cmd@v1
