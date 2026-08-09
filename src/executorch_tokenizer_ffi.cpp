@@ -115,6 +115,12 @@ std::unique_ptr<::tokenizers::Tokenizer> load_any(const std::string& path,
     return nullptr;
 }
 
+/* Interpreting WHY a tokenizer file was rejected belongs in the Dart layer,
+ * which already parses the JSON properly (see diagnoseTokenizerJson). This
+ * layer reports only what it actually knows: which readers were tried, and
+ * that none accepted the file. Sniffing the format here would duplicate that
+ * logic in a worse form and need a native release to change. */
+
 } // namespace
 
 /* ============================================================================
@@ -135,9 +141,17 @@ ET_API ETStatus* et_tokenizer_create(const char* tokenizer_path,
         const char* format = nullptr;
         auto impl = load_any(std::string(tokenizer_path), &format);
         if (impl == nullptr) {
+            // Naming the readers that were tried matters: each one logs its own
+            // failure to stderr, and a real error in the correct reader is
+            // otherwise buried under three irrelevant ones — which made a
+            // lookahead-regex failure read as a format problem
+            // (executorch_flutter#45).
             return create_status(ET_MODEL_LOAD_FAILED,
-                                 "failed to load tokenizer (unrecognized format, "
-                                 "or file missing/unreadable)",
+                                 "no reader accepted this file (tried "
+                                 "HuggingFace JSON, tiktoken, sentencepiece, "
+                                 "llama2c). Each logs its own error to stderr; "
+                                 "the one for the format you expected is the "
+                                 "relevant one",
                                  __func__);
         }
 
