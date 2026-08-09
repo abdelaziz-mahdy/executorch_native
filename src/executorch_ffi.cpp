@@ -32,7 +32,19 @@ using namespace executorch::runtime;
  * ============================================================================ */
 
 #define EXECUTORCH_FFI_VERSION "2.0.0"
-#define EXECUTORCH_VERSION "1.1.0"
+
+/* The ExecuTorch version actually built against, injected by CMake from the
+ * EXECUTORCH_VERSION cache variable that already selects the prebuilt.
+ *
+ * The fallback exists only so this file still compiles outside our CMake (a
+ * bare compile, an IDE index). It is deliberately marked unknown rather than
+ * carrying a plausible-looking number: this was hardcoded to "1.1.0" and went
+ * stale through 1.2.0, 1.3.1 and 1.4.0 while reporting a version that looked
+ * legitimate, so et_executorch_version() lied for three releases. A wrong
+ * answer is worse than an obviously missing one. */
+#ifndef EXECUTORCH_VERSION
+#define EXECUTORCH_VERSION "unknown"
+#endif
 
 /* ============================================================================
  * Debug Logging
