@@ -30,11 +30,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Shared with release.yaml so a warm run and a release build never compile the
-  # same thing at the same time on the same runners. Not cancel-in-progress:
-  # whichever started first should finish and populate the cache.
-  group: native-build
-  cancel-in-progress: false
+  # Warm-specific now that release.yaml waits explicitly rather than sharing a
+  # group. A newer warm run supersedes an older one — they would write the same
+  # cache, so the older one is wasted work.
+  group: warm-ccache
+  cancel-in-progress: true
 
 jobs:
   # Read the version from CMakeLists rather than hardcoding it here — one more

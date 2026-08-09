@@ -11,19 +11,45 @@ on:
         required: true
         default: '1.1.0'
 
-concurrency:
-  # Shared with warm-ccache.yaml. A release must not compile the same thing at
-  # the same time as a cache-warming run — that is two cold builds racing for
-  # the same runners, which is what happened on v1.4.0.4. Queue instead, so the
-  # release starts after warming has populated the default-branch cache.
-  group: native-build
-  cancel-in-progress: false
-
 # Grant permissions to all jobs (inherited by workflow_call)
 permissions:
   contents: write
 
 jobs:
+  # ============================================================================
+  # Wait for any in-flight cache warming before building
+  # ============================================================================
+  # Warming runs on main because Actions caches are ref-scoped and a tag run
+  # cannot save one. A release that starts alongside a warm run gets no benefit
+  # from it and duplicates the work, so this blocks until warming finishes.
+  #
+  # An explicit wait rather than a shared concurrency group: with the group,
+  # queueing a release while a warm run was still PENDING cancelled the warm
+  # run, because GitHub drops the previously-pending run in a group when a new
+  # one arrives. That is the opposite of the intent.
+  wait-for-warm:
+    name: Wait for cache warming
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for warm-ccache to finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 120); do
+            ACTIVE=$(gh api \
+              "repos/${{ github.repository }}/actions/workflows/warm-ccache.yaml/runs?per_page=20" \
+              --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 0)
+            if [ "$ACTIVE" = "0" ]; then
+              echo "No warm run in flight; proceeding."
+              exit 0
+            fi
+            echo "warm-ccache still running ($ACTIVE active) — waiting (${i}/120)..."
+            sleep 60
+          done
+          # Do not fail the release over this. A warm cache is an optimisation;
+          # blocking a release for good because warming hung would be worse.
+          echo "::warning::Timed out waiting for warm-ccache; building anyway (cache may be cold)."
+
   # ============================================================================
   # Determine version from tag or input
   # ============================================================================
@@ -57,7 +83,7 @@ jobs:
   # ============================================================================
   build-android:
     name: Build Android
-    needs: get-version
+    needs: [get-version, wait-for-warm]
     uses: ./.github/workflows/build-android.yaml
     with:
       version: ${{ needs.get-version.outputs.version }}
@@ -66,7 +92,7 @@ jobs:
 
   build-apple:
     name: Build Apple
-    needs: get-version
+    needs: [get-version, wait-for-warm]
     uses: ./.github/workflows/build-apple.yaml
     with:
       version: ${{ needs.get-version.outputs.version }}
@@ -75,7 +101,7 @@ jobs:
 
   build-linux:
     name: Build Linux
-    needs: get-version
+    needs: [get-version, wait-for-warm]
     uses: ./.github/workflows/build-linux.yaml
     with:
       version: ${{ needs.get-version.outputs.version }}
@@ -84,7 +110,7 @@ jobs:
 
   build-windows:
     name: Build Windows
-    needs: get-version
+    needs: [get-version, wait-for-warm]
     uses: ./.github/workflows/build-windows.yaml
     with:
       version: ${{ needs.get-version.outputs.version }}
