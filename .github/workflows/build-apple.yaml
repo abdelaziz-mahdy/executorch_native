@@ -72,9 +72,13 @@ jobs:
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
 
-      - name: Install Vulkan SDK (MoltenVK + shaderc)
+      # Only shaderc (for glslc) comes from Homebrew. MoltenVK is downloaded from
+      # its own release and relinked by the build script, because Homebrew's
+      # prebuilt dylib has no install-name headroom — see the MoltenVK comment in
+      # scripts/build-macos.sh.
+      - name: Install shaderc (glslc for Vulkan shader compilation)
         run: |
-          brew install shaderc molten-vk
+          brew install shaderc
 
       - name: Verify Vulkan SDK
         run: |
@@ -159,9 +163,13 @@ jobs:
       # variant 28 of 30 has still done most of the work, and these jobs run
       # 30-100 minutes.
 
-      - name: Install Vulkan SDK (MoltenVK + shaderc)
+      # Only shaderc (for glslc) comes from Homebrew. MoltenVK is downloaded from
+      # its own release and relinked by the build script, because Homebrew's
+      # prebuilt dylib has no install-name headroom — see the MoltenVK comment in
+      # scripts/build-macos.sh.
+      - name: Install shaderc (glslc for Vulkan shader compilation)
         run: |
-          brew install shaderc molten-vk
+          brew install shaderc
 
       - name: Verify Vulkan SDK
         run: |

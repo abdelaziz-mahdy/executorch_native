@@ -22,9 +22,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CACHE_DIR="${PROJECT_DIR}/.cache"
 
-# MoltenVK paths (set by find_moltenvk after brew install)
-MOLTENVK_LIB=""
-MOLTENVK_ICD=""
+# MoltenVK release we link our own dylib from.
+#
+# We deliberately do NOT ship a prebuilt libMoltenVK.dylib — neither Khronos's
+# nor Homebrew's. Both are linked without -headerpad_max_install_names, leaving
+# 16 and 48 bytes of Mach-O header slack respectively. Dart/Flutter native
+# assets relocate bundled dylibs by rewriting their install name to an absolute
+# path (~100 characters), which does not fit, so the consumer's build dies with:
+#
+#   install_name_tool: changing install names or rpaths can't be redone for:
+#     .dart_tool/lib/libMoltenVK.dylib (for architecture arm64)
+#     because larger updated load commands do not fit
+#
+# Header slack is fixed at link time and cannot be widened afterwards, so the
+# only cure is to link the dylib ourselves. Khronos ships the static library in
+# the same tarball, which makes this one clang++ invocation rather than a
+# MoltenVK source build.
+#
+# See: https://github.com/abdelaziz-mahdy/executorch_flutter/issues/51
+MOLTENVK_VERSION="1.4.2"
+# MoltenVK 1.4.x objects are compiled for macOS 12.0, so the dylib we link from
+# them carries that floor. The FFI library itself still targets 11.0; only the
+# Vulkan variants require macOS 12+. This is not a regression — Homebrew's
+# MoltenVK 1.4.1 had the same floor, it was simply never stated.
+MOLTENVK_DEPLOYMENT_TARGET="12.0"
+MOLTENVK_STATIC_LIB=""
 
 # Check for Vulkan SDK / glslc availability (via MoltenVK on macOS)
 check_vulkan() {
@@ -37,68 +59,124 @@ check_vulkan() {
     return 1
 }
 
-# Find MoltenVK library and ICD JSON from Homebrew installation
-find_moltenvk() {
-    local brew_prefix
-    brew_prefix=$(brew --prefix 2>/dev/null || echo "/opt/homebrew")
+# Confirm a dylib's Mach-O header has room to grow its install name.
+#
+# The consumer's toolchain (Dart/Flutter native assets) relocates every bundled
+# dylib by rewriting its install name to an absolute path. That rewrite can only
+# use padding reserved at link time, and a library without headroom fails the
+# rewrite in the consumer's build — long after we have shipped it. Check here
+# instead, where the failure is ours to fix.
+#
+# 512 bytes is well past the ~100-character paths seen in practice and far under
+# the ~12 KB that -headerpad_max_install_names actually reserves.
+verify_install_name_headroom() {
+    local lib=$1
+    local min_pad=512
 
-    # Look for libMoltenVK.dylib
-    if [ -f "${brew_prefix}/lib/libMoltenVK.dylib" ]; then
-        MOLTENVK_LIB="${brew_prefix}/lib/libMoltenVK.dylib"
-    elif [ -f "/usr/local/lib/libMoltenVK.dylib" ]; then
-        MOLTENVK_LIB="/usr/local/lib/libMoltenVK.dylib"
-    fi
+    local sizeofcmds text_off pad
+    sizeofcmds=$(otool -h "$lib" | tail -1 | awk '{print $7}')
+    text_off=$(otool -l "$lib" | grep -A6 "sectname __text" | grep -m1 offset | awk '{print $2}')
+    # 32 = sizeof(mach_header_64), which precedes the load commands.
+    pad=$(( text_off - 32 - sizeofcmds ))
 
-    # Look for MoltenVK_icd.json (can be in share/ or etc/ depending on version)
-    if [ -f "${brew_prefix}/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
-        MOLTENVK_ICD="${brew_prefix}/share/vulkan/icd.d/MoltenVK_icd.json"
-    elif [ -f "${brew_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json" ]; then
-        MOLTENVK_ICD="${brew_prefix}/etc/vulkan/icd.d/MoltenVK_icd.json"
-    elif [ -f "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
-        MOLTENVK_ICD="/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
-    elif [ -f "/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json" ]; then
-        MOLTENVK_ICD="/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json"
+    if [ "$pad" -lt "$min_pad" ]; then
+        echo "    ERROR: $(basename "$lib") has ${pad} bytes of Mach-O header padding (need >= ${min_pad})."
+        echo "           Native-assets relocation rewrites the install name to an absolute"
+        echo "           path and will fail on this library. Relink it with"
+        echo "           -Wl,-headerpad_max_install_names."
+        return 1
     fi
-
-    if [ -n "$MOLTENVK_LIB" ] && [ -n "$MOLTENVK_ICD" ]; then
-        echo "  Found MoltenVK library: $MOLTENVK_LIB"
-        echo "  Found MoltenVK ICD: $MOLTENVK_ICD"
-        return 0
-    fi
-    return 1
+    echo "    $(basename "$lib"): ${pad} bytes of install-name headroom"
+    return 0
 }
 
-# Bundle MoltenVK files into the install directory for Vulkan variants
-bundle_moltenvk() {
-    local install_dir=$1
+# Download the MoltenVK release and cache its static library.
+fetch_moltenvk() {
+    local dir="${CACHE_DIR}/moltenvk-${MOLTENVK_VERSION}"
+    local lib="${dir}/MoltenVK/MoltenVK/static/MoltenVK.xcframework/macos-arm64_x86_64/libMoltenVK.a"
 
-    if [ -z "$MOLTENVK_LIB" ] || [ -z "$MOLTENVK_ICD" ]; then
-        echo "  WARNING: MoltenVK not found, skipping bundle"
+    if [ -f "$lib" ]; then
+        MOLTENVK_STATIC_LIB="$lib"
+        echo "  MoltenVK ${MOLTENVK_VERSION} already cached"
+        return 0
+    fi
+
+    local url="https://github.com/KhronosGroup/MoltenVK/releases/download/v${MOLTENVK_VERSION}/MoltenVK-macos.tar"
+    echo "  Downloading MoltenVK ${MOLTENVK_VERSION}..."
+    mkdir -p "$dir"
+    if ! curl -fsSL "$url" -o "${dir}/MoltenVK-macos.tar"; then
+        echo "  WARNING: could not download MoltenVK from ${url}"
         return 1
     fi
 
-    echo "  Bundling MoltenVK runtime files..."
+    # The static library is universal (arm64 + x86_64); one download serves both
+    # architectures, so only that member is extracted.
+    tar -xf "${dir}/MoltenVK-macos.tar" -C "$dir" \
+        MoltenVK/MoltenVK/static/MoltenVK.xcframework/macos-arm64_x86_64/libMoltenVK.a
+    rm -f "${dir}/MoltenVK-macos.tar"
+
+    if [ ! -f "$lib" ]; then
+        echo "  WARNING: MoltenVK static library missing after extraction"
+        return 1
+    fi
+
+    MOLTENVK_STATIC_LIB="$lib"
+    echo "  MoltenVK static library: $lib"
+    return 0
+}
+
+# Link libMoltenVK.dylib into the install directory for Vulkan variants
+bundle_moltenvk() {
+    local install_dir=$1
+    local arch=$2
+
+    if [ -z "$MOLTENVK_STATIC_LIB" ]; then
+        echo "  ERROR: MoltenVK static library unavailable, cannot bundle Vulkan runtime"
+        return 1
+    fi
+
+    echo "  Linking MoltenVK ${MOLTENVK_VERSION} for ${arch}..."
 
     # Create directories
     mkdir -p "${install_dir}/lib"
     mkdir -p "${install_dir}/share/vulkan/icd.d"
 
-    # Copy libMoltenVK.dylib
-    cp "$MOLTENVK_LIB" "${install_dir}/lib/"
-    echo "    Copied libMoltenVK.dylib"
-
-    # Fix MoltenVK install name to use @rpath for relocatability
     local moltenvk_dest="${install_dir}/lib/libMoltenVK.dylib"
-    install_name_tool -id "@rpath/libMoltenVK.dylib" "$moltenvk_dest" 2>/dev/null || true
-    echo "    Fixed MoltenVK install name to @rpath"
+    clang++ -dynamiclib \
+        -arch "${arch}" \
+        -mmacosx-version-min="${MOLTENVK_DEPLOYMENT_TARGET}" \
+        -Wl,-all_load "${MOLTENVK_STATIC_LIB}" \
+        -Wl,-headerpad_max_install_names \
+        -install_name "@rpath/libMoltenVK.dylib" \
+        -framework Metal \
+        -framework Foundation \
+        -framework QuartzCore \
+        -framework IOSurface \
+        -framework IOKit \
+        -framework AppKit \
+        -framework CoreGraphics \
+        -o "${moltenvk_dest}"
+    echo "    Linked libMoltenVK.dylib with install name @rpath/libMoltenVK.dylib"
+
+    # The entire reason this library is linked rather than copied.
+    verify_install_name_headroom "$moltenvk_dest" || return 1
 
     # Add @loader_path to rpath of executorch_ffi library so it finds MoltenVK
     # The FFI library should be able to find MoltenVK in the same directory
     local ffi_lib="${install_dir}/lib/libexecutorch_ffi.dylib"
     if [ -f "$ffi_lib" ]; then
-        # Add @loader_path to rpath (where the loader itself is located)
-        install_name_tool -add_rpath "@loader_path" "$ffi_lib" 2>/dev/null || true
-        echo "    Added @loader_path to FFI library rpath"
+        # Add @loader_path to rpath (where the loader itself is located).
+        # CMake may have added it already; adding it twice is an error, so only
+        # add it when missing — and fail loudly if the add itself fails, since a
+        # silent miss here means the shipped library cannot find MoltenVK.
+        if otool -l "$ffi_lib" | grep -A2 LC_RPATH | grep -q "path @loader_path "; then
+            echo "    FFI library already has @loader_path rpath"
+        elif install_name_tool -add_rpath "@loader_path" "$ffi_lib"; then
+            echo "    Added @loader_path to FFI library rpath"
+        else
+            echo "    ERROR: failed to add @loader_path rpath to libexecutorch_ffi.dylib"
+            return 1
+        fi
     fi
 
     # Create modified ICD JSON with relative path
@@ -159,6 +237,12 @@ bundle_libomp() {
     # Ensure the FFI library searches its own directory for the bundled libomp
     install_name_tool -add_rpath "@loader_path" "$ffi_lib" 2>/dev/null || true
     echo "    Bundled libomp.dylib and repointed FFI to @rpath/libomp.dylib"
+
+    # libomp is copied from Homebrew/torch rather than linked here, so it carries
+    # whatever header padding its builder chose. Today that is ample, but this is
+    # the same failure mode MoltenVK hit — catch it here rather than in a
+    # consumer's build. See issue #51.
+    verify_install_name_headroom "${install_dir}/lib/libomp.dylib" || return 1
     return 0
 }
 
@@ -219,13 +303,12 @@ install_dependencies() {
   # 1.3.x series). Keep this in sync with ExecuTorch's install_requirements.
   pip install pyyaml "torch==2.11.*" --extra-index-url https://download.pytorch.org/whl/cpu
 
-  # Find MoltenVK installation (installed via Homebrew in CI)
-  echo "Looking for MoltenVK..."
-  if find_moltenvk; then
-    echo "MoltenVK found - will be bundled with Vulkan variants"
+  # Fetch the MoltenVK static library the Vulkan variants link their runtime from
+  echo "Fetching MoltenVK..."
+  if fetch_moltenvk; then
+    echo "MoltenVK ready - will be linked into Vulkan variants"
   else
-    echo "WARNING: MoltenVK not found - Vulkan variants will not include runtime"
-    echo "         Install with: brew install molten-vk"
+    echo "WARNING: MoltenVK unavailable - Vulkan variants will fail to bundle"
   fi
 
   # The MLX LLM variant compiles Metal shaders (mlx.metallib) with the `metal`
@@ -273,7 +356,7 @@ build_variant() {
   if [ "$vulkan" = "ON" ]; then
     if ! check_vulkan; then
       echo "ERROR: Vulkan variant requested but glslc not found"
-      echo "Please install: brew install shaderc molten-vk"
+      echo "Please install: brew install shaderc"
       exit 1
     fi
     echo "  Vulkan: enabled (glslc found)"
@@ -303,9 +386,10 @@ build_variant() {
   # Install
   cmake --install "$build_dir" --config "${build_type}"
 
-  # Bundle MoltenVK for Vulkan variants
+  # Bundle MoltenVK for Vulkan variants. A Vulkan variant without a working
+  # MoltenVK runtime is not shippable, so this failing fails the build.
   if [ "$vulkan" = "ON" ]; then
-    bundle_moltenvk "${build_dir}/install"
+    bundle_moltenvk "${build_dir}/install" "${arch}"
   fi
 
   # Bundle libomp for Metal variants (AOTI runtime needs OpenMP)
