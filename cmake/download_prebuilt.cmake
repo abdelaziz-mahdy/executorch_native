@@ -73,8 +73,12 @@ function(download_hash_file hash_url output_var)
 
     list(GET _download_status 0 _status_code)
     if(NOT _status_code EQUAL 0)
-        message(WARNING "Failed to download hash file: ${hash_url}")
-        message(WARNING "  Status: ${_download_status}")
+        # Usually means this backend combination is not published for this
+        # platform/architecture rather than anything wrong with the network.
+        # Say so here: the caller turns this into a fatal error with the full
+        # detail, but this line is the one people copy into bug reports.
+        message(STATUS "No hash file for this variant (it may not be published): ${hash_url}")
+        message(STATUS "  Status: ${_download_status}")
         set(${output_var} "" PARENT_SCOPE)
         return()
     endif()
@@ -141,12 +145,30 @@ else()
     # If hash file doesn't exist, the prebuilt binary doesn't exist either
     # Fail early with a clear error message
     if("${_expected_hash}" STREQUAL "")
+        # Name the likely cause when the variant contains a backend that only
+        # exists on some architectures. Metal and MLX are built against PyTorch,
+        # which ships no macOS x86_64 wheels, so they are Apple-Silicon only —
+        # and a universal macOS build compiles an x86_64 slice too, which is how
+        # this reaches people who never asked for Intel support.
+        set(_arch_hint "")
+        if(EXECUTORCH_PLATFORM STREQUAL "macos" AND EXECUTORCH_ARCH STREQUAL "x86_64")
+            if(EXECUTORCH_VARIANT MATCHES "metal|mlx")
+                set(_arch_hint
+                    "This variant contains a backend that does not exist for macOS x86_64.\n"
+                    "Metal and MLX are Apple-Silicon only (they build against PyTorch,\n"
+                    "which no longer ships macOS x86_64 wheels).\n"
+                    "\n"
+                    "  Fix: drop 'metal'/'mlx' from `backends:`, or build arm64-only.\n"
+                    "\n")
+            endif()
+        endif()
+
         message(FATAL_ERROR
             "============================================================\n"
-            "ERROR: Pre-built binary not available for this platform.\n"
+            "ERROR: No pre-built binary published for this configuration.\n"
             "============================================================\n"
             "\n"
-            "Could not find pre-built binary:\n"
+            "Requested:\n"
             "  ${_filename}\n"
             "\n"
             "Platform: ${EXECUTORCH_PLATFORM}\n"
@@ -155,15 +177,19 @@ else()
             "Build Type: ${_build_type_lower}\n"
             "Version: v${EXECUTORCH_PREBUILT_VERSION}\n"
             "\n"
+            ${_arch_hint}
+            "This is the backend combination that was requested, not a network\n"
+            "error - the release simply has no artifact with that name.\n"
+            "\n"
             "Options:\n"
-            "  1. Check available prebuilts at:\n"
+            "  1. Check which variants exist for this platform at:\n"
             "     https://github.com/${EXECUTORCH_PREBUILT_REPO}/releases/tag/v${EXECUTORCH_PREBUILT_VERSION}\n"
             "\n"
             "  2. Build from source (slower, requires ExecuTorch setup):\n"
             "     In pubspec.yaml:\n"
             "       hooks:\n"
             "         user_defines:\n"
-            "           executorch_flutter:\n"
+            "           executorch_dart:\n"
             "             build_mode: \"source\"\n"
             "============================================================\n"
         )
