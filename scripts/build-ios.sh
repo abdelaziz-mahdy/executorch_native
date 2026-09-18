@@ -18,11 +18,11 @@
 # Vulkan builds require glslc compiler (install: brew install shaderc molten-vk)
 #
 # Usage: ./build-ios.sh [VERSION]
-# Example: ./build-ios.sh 1.4.0
+# Example: ./build-ios.sh 1.5.0
 
 set -e
 
-VERSION="${1:-1.4.0}"
+VERSION="${1:-1.5.0}"
 
 # Which slice to build. The three targets share nothing — each has its own
 # .et-shared directory keyed by arch, and ccache cannot hit across them because
