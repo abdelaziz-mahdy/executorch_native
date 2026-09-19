@@ -12,11 +12,11 @@
 # MoltenVK is bundled with Vulkan variants for runtime use.
 #
 # Usage: ./build-macos.sh [VERSION]
-# Example: ./build-macos.sh 1.4.0
+# Example: ./build-macos.sh 1.5.0
 
 set -e
 
-VERSION="${1:-1.4.0}"
+VERSION="${1:-1.5.0}"
 PLATFORM="macos"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -299,9 +299,9 @@ install_dependencies() {
 
   # Install Python dependencies.
   # The Metal backend is AOTI-based and compiles against PyTorch's AOTInductor
-  # headers, so torch must match the version ExecuTorch pins (2.11.x for the
-  # 1.3.x series). Keep this in sync with ExecuTorch's install_requirements.
-  pip install pyyaml "torch==2.11.*" --extra-index-url https://download.pytorch.org/whl/cpu
+  # headers, so torch must match the version ExecuTorch pins (2.14.x for 1.5.0,
+  # see torch_pin.py upstream). Keep this in sync on every ExecuTorch bump.
+  pip install pyyaml "torch==2.14.*" --extra-index-url https://download.pytorch.org/whl/cpu
 
   # Fetch the MoltenVK static library the Vulkan variants link their runtime from
   echo "Fetching MoltenVK..."
